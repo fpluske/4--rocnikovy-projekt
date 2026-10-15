@@ -3,17 +3,28 @@ services:
     build:
       context: ./backend
     environment:
-      PORT: 3000
-      LAUNCHER_REGISTRATION_KEY: ${LAUNCHER_REGISTRATION_KEY:-change-me-in-production}
-    expose:
-      - "3000"
+      DATABASE_URL: ${DATABASE_URL:-sqlite:///./data/orbit.db}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://localhost:8080}
+    ports:
+      - "8000:8000"
+    volumes:
+      - orbit-data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     restart: unless-stopped
 
   frontend:
     build:
       context: ./frontend
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     ports:
       - "8080:80"
     restart: unless-stopped
+
+volumes:
+  orbit-data:

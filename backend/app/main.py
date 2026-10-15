@@ -1,0 +1,171 @@
+from datetime import datetime, timedelta, timezone
+import hashlib
+
+from fastapi import Depends, FastAPI, HTTPException, Query, status
+from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import select, text
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
+
+from .config import settings
+from .database import Base, engine, get_db
+from .models import AuditEvent, Command, CommandStatus, Device, EventType, PairingRequest, PairingStatus
+from .schemas import (
+    CommandCreate, CommandRead, DeviceCreate, DeviceRead, EventRead, HealthRead,
+    PairingConfirm, PairingDiscovery, PairingRead,
+)
+
+Base.metadata.create_all(bind=engine)
+
+app = FastAPI(title="Orbit Quest Management API", version="0.1.0")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origin_list,
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.get("/api/health", response_model=HealthRead, tags=["system"])
+def health(db: Session = Depends(get_db)) -> HealthRead:
+    try:
+        db.execute(text("SELECT 1"))
+    except Exception as error:
+        raise HTTPException(status_code=503, detail="Databáze není dostupná.") from error
+    return HealthRead(status="ok", database="ok")
+
+
+@app.get("/api/devices", response_model=list[DeviceRead], tags=["devices"])
+def list_devices(db: Session = Depends(get_db)) -> list[Device]:
+    return list(db.scalars(select(Device).order_by(Device.created_at.desc())))
+
+
+def pin_digest(nonce: str, pin: str) -> str:
+    return hashlib.sha256(f"{nonce}:{pin}".encode("utf-8")).hexdigest()
+
+
+def expire_pairing_requests(db: Session) -> None:
+    now = datetime.now(timezone.utc)
+    requests = db.scalars(
+        select(PairingRequest).where(
+            PairingRequest.status == PairingStatus.pending,
+            PairingRequest.expires_at < now,
+        )
+    )
+    for pairing in requests:
+        pairing.status = PairingStatus.expired
+
+
+@app.get("/api/pairing", response_model=list[PairingRead], tags=["pairing"])
+def list_pairing_requests(db: Session = Depends(get_db)) -> list[PairingRequest]:
+    expire_pairing_requests(db)
+    db.commit()
+    return list(db.scalars(
+        select(PairingRequest)
+        .where(PairingRequest.status == PairingStatus.pending)
+        .order_by(PairingRequest.created_at.desc())
+    ))
+
+
+@app.post("/api/pairing/discover", response_model=PairingRead, status_code=status.HTTP_201_CREATED, tags=["pairing"])
+def discover_device(data: PairingDiscovery, db: Session = Depends(get_db)) -> PairingRequest:
+    if data.pin is None and data.pin_digest is None:
+        raise HTTPException(status_code=400, detail="Discovery musí obsahovat PIN důkaz.")
+    digest = data.pin_digest or pin_digest(data.nonce, data.pin or "")
+    pairing = PairingRequest(
+        name=data.name,
+        serial_number=data.serial_number,
+        model=data.model,
+        nonce=data.nonce,
+        pin_digest=digest,
+        expires_at=datetime.now(timezone.utc) + timedelta(minutes=5),
+    )
+    db.add(pairing)
+    db.add(AuditEvent(type=EventType.pairing_discovered, message=f"Objeveno zařízení {data.name}."))
+    db.commit()
+    db.refresh(pairing)
+    return pairing
+
+
+@app.post("/api/pairing/{pairing_id}/confirm", response_model=DeviceRead, tags=["pairing"])
+def confirm_pairing(pairing_id: str, data: PairingConfirm, db: Session = Depends(get_db)) -> Device:
+    pairing = db.get(PairingRequest, pairing_id)
+    if pairing is None:
+        raise HTTPException(status_code=404, detail="Pairing žádost nebyla nalezena.")
+    if pairing.status != PairingStatus.pending:
+        raise HTTPException(status_code=409, detail="Pairing žádost již není aktivní.")
+    if pairing.expires_at < datetime.now(timezone.utc):
+        pairing.status = PairingStatus.expired
+        db.commit()
+        raise HTTPException(status_code=410, detail="Pairing žádost vypršela.")
+    if pin_digest(pairing.nonce, data.pin) != pairing.pin_digest:
+        raise HTTPException(status_code=400, detail="PIN není správný.")
+    existing = db.scalar(select(Device).where(Device.serial_number == pairing.serial_number))
+    if existing is not None:
+        raise HTTPException(status_code=409, detail="Zařízení s tímto sériovým číslem již existuje.")
+    device = Device(name=pairing.name, serial_number=pairing.serial_number, model=pairing.model)
+    pairing.status = PairingStatus.confirmed
+    pairing.confirmed_at = datetime.now(timezone.utc)
+    db.add(device)
+    db.flush()
+    pairing.device_id = device.id
+    db.add(AuditEvent(device=device, type=EventType.pairing_confirmed, message=f"Zařízení {device.name} bylo spárováno."))
+    db.commit()
+    db.refresh(device)
+    return device
+
+
+@app.post("/api/devices", response_model=DeviceRead, status_code=status.HTTP_201_CREATED, tags=["devices"])
+def create_device(data: DeviceCreate, db: Session = Depends(get_db)) -> Device:
+    device = Device(**data.model_dump())
+    db.add(device)
+    db.add(AuditEvent(device=device, type=EventType.device_registered, message=f"Zařízení {data.name} bylo registrováno."))
+    try:
+        db.commit()
+    except IntegrityError as error:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Zařízení s tímto sériovým číslem již existuje.") from error
+    db.refresh(device)
+    return device
+
+
+@app.delete("/api/devices/{device_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["devices"])
+def delete_device(device_id: str, db: Session = Depends(get_db)) -> None:
+    device = db.get(Device, device_id)
+    if device is None:
+        raise HTTPException(status_code=404, detail="Zařízení nebylo nalezeno.")
+    db.delete(device)
+    db.commit()
+
+
+@app.get("/api/devices/{device_id}/commands", response_model=list[CommandRead], tags=["commands"])
+def list_commands(
+    device_id: str,
+    limit: int = Query(default=50, ge=1, le=200),
+    db: Session = Depends(get_db),
+) -> list[Command]:
+    if db.get(Device, device_id) is None:
+        raise HTTPException(status_code=404, detail="Zařízení nebylo nalezeno.")
+    return list(db.scalars(select(Command).where(Command.device_id == device_id).order_by(Command.created_at.desc()).limit(limit)))
+
+
+@app.post("/api/devices/{device_id}/commands", response_model=CommandRead, status_code=status.HTTP_201_CREATED, tags=["commands"])
+def create_command(device_id: str, data: CommandCreate, db: Session = Depends(get_db)) -> Command:
+    device = db.get(Device, device_id)
+    if device is None:
+        raise HTTPException(status_code=404, detail="Zařízení nebylo nalezeno.")
+    command = Command(device_id=device_id, **data.model_dump())
+    db.add(command)
+    db.add(AuditEvent(device=device, type=EventType.command_created, message=f"Naplánován příkaz: {data.type.value}."))
+    db.commit()
+    db.refresh(command)
+    return command
+
+
+@app.get("/api/events", response_model=list[EventRead], tags=["events"])
+def list_events(
+    limit: int = Query(default=50, ge=1, le=200),
+    db: Session = Depends(get_db),
+) -> list[AuditEvent]:
+    return list(db.scalars(select(AuditEvent).order_by(AuditEvent.created_at.desc()).limit(limit)))

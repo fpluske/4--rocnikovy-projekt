@@ -1,6 +1,0 @@
-<resources>
-    <style name="Theme.QuestLauncher" parent="android:style/Theme.Material.Light.NoActionBar">
-        <item name="android:fontFamily">sans</item>
-        <item name="android:colorAccent">#13b8a6</item>
-    </style>
-</resources>

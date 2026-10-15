@@ -1,3 +1,29 @@
-node_modules
-dist
+# Dependencies and build output
+node_modules/
+dist/
+
+# Environment and local configuration
 .env
+.env.*
+!.env.example
+docker-compose.override.yml
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Local application data
+backend/data/
+*.db
+*.sqlite
+*.sqlite3
+
+# Tooling and operating system files
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.DS_Store
