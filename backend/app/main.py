@@ -45,16 +45,26 @@ def pin_digest(nonce: str, pin: str) -> str:
     return hashlib.sha256(f"{nonce}:{pin}".encode("utf-8")).hexdigest()
 
 
+def utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
 def expire_pairing_requests(db: Session) -> None:
-    now = datetime.now(timezone.utc)
+    now = utc_now()
     requests = db.scalars(
         select(PairingRequest).where(
             PairingRequest.status == PairingStatus.pending,
-            PairingRequest.expires_at < now,
         )
     )
     for pairing in requests:
-        pairing.status = PairingStatus.expired
+        if as_utc(pairing.expires_at) < now:
+            pairing.status = PairingStatus.expired
 
 
 @app.get("/api/pairing", response_model=list[PairingRead], tags=["pairing"])
@@ -79,7 +89,7 @@ def discover_device(data: PairingDiscovery, db: Session = Depends(get_db)) -> Pa
         model=data.model,
         nonce=data.nonce,
         pin_digest=digest,
-        expires_at=datetime.now(timezone.utc) + timedelta(minutes=5),
+        expires_at=utc_now() + timedelta(minutes=5),
     )
     db.add(pairing)
     db.add(AuditEvent(type=EventType.pairing_discovered, message=f"Objeveno zařízení {data.name}."))
@@ -95,7 +105,7 @@ def confirm_pairing(pairing_id: str, data: PairingConfirm, db: Session = Depends
         raise HTTPException(status_code=404, detail="Pairing žádost nebyla nalezena.")
     if pairing.status != PairingStatus.pending:
         raise HTTPException(status_code=409, detail="Pairing žádost již není aktivní.")
-    if pairing.expires_at < datetime.now(timezone.utc):
+    if as_utc(pairing.expires_at) < utc_now():
         pairing.status = PairingStatus.expired
         db.commit()
         raise HTTPException(status_code=410, detail="Pairing žádost vypršela.")
@@ -106,7 +116,7 @@ def confirm_pairing(pairing_id: str, data: PairingConfirm, db: Session = Depends
         raise HTTPException(status_code=409, detail="Zařízení s tímto sériovým číslem již existuje.")
     device = Device(name=pairing.name, serial_number=pairing.serial_number, model=pairing.model)
     pairing.status = PairingStatus.confirmed
-    pairing.confirmed_at = datetime.now(timezone.utc)
+    pairing.confirmed_at = utc_now()
     db.add(device)
     db.flush()
     pairing.device_id = device.id
@@ -114,6 +124,20 @@ def confirm_pairing(pairing_id: str, data: PairingConfirm, db: Session = Depends
     db.commit()
     db.refresh(device)
     return device
+
+
+@app.post("/api/pairing/{pairing_id}/reject", response_model=PairingRead, tags=["pairing"])
+def reject_pairing(pairing_id: str, db: Session = Depends(get_db)) -> PairingRequest:
+    pairing = db.get(PairingRequest, pairing_id)
+    if pairing is None:
+        raise HTTPException(status_code=404, detail="Pairing žádost nebyla nalezena.")
+    if pairing.status != PairingStatus.pending:
+        raise HTTPException(status_code=409, detail="Pairing žádost již není aktivní.")
+    pairing.status = PairingStatus.rejected
+    db.add(AuditEvent(type=EventType.pairing_rejected, message=f"Pairing zařízení {pairing.name} byl odmítnut."))
+    db.commit()
+    db.refresh(pairing)
+    return pairing
 
 
 @app.post("/api/devices", response_model=DeviceRead, status_code=status.HTTP_201_CREATED, tags=["devices"])

@@ -42,7 +42,7 @@ migracemi.
 - **`audit_events`** – neměnitelný základ auditní historie registrací, příkazů
   a pozdějších heartbeatů.
 - **`pairing_requests`** – krátkodobé discovery žádosti s nonce, hashí PINu,
-  expirací a stavem (`pending`, `confirmed`, `expired`).
+  expirací a stavem (`pending`, `confirmed`, `expired`, `rejected`).
 
 Vztahy:
 
@@ -66,6 +66,7 @@ nebo později přes autentizovaný Quest agent.
 - `GET /api/pairing`
 - `POST /api/pairing/discover`
 - `POST /api/pairing/{pairing_id}/confirm`
+- `POST /api/pairing/{pairing_id}/reject`
 
 Autentizace, skutečné doručování příkazů agentovi, heartbeat a PostgreSQL jsou
 navazující kroky. Připojení k PostgreSQL lze připravit nastavením `DATABASE_URL`;

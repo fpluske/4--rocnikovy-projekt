@@ -22,7 +22,9 @@ button { padding: 9px 13px; color: #27333d; background: #edf2f3; border: 0; bord
 button:hover { filter: brightness(.96); }
 .primary { margin-top: 8px; color: white; background: #218c83; }
 .pairing-button { margin-top: 0; padding: 12px 18px; }
+.pairing-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
 .close-button { padding: 0 8px; font-size: 1.5rem; background: transparent; }
+.danger { color: #a43b3b; background: #fbe9e9; }
 .secondary { background: white; border: 1px solid #ccd7dc; }
 .notice { margin-top: 24px; padding: 13px 16px; color: #21635e; background: #e3f4f1; border-radius: 8px; }
 .section-heading { margin-bottom: 12px; }
@@ -38,4 +40,4 @@ button:hover { filter: brightness(.96); }
 .status.unknown { color: #6b5b20; background: #fff2bd; }
 .status.online { color: #176b4a; background: #d9f5e7; }
 .actions { flex-wrap: wrap; justify-content: flex-end; }
-@media (max-width: 760px) { header, .device { align-items: flex-start; flex-direction: column; } .header-actions { width: 100%; justify-content: flex-start; } .layout { grid-template-columns: 1fr; } .actions { justify-content: flex-start; } }
+@media (max-width: 760px) { header, .device { align-items: flex-start; flex-direction: column; } .header-actions, .pairing-actions { width: 100%; justify-content: flex-start; } .layout { grid-template-columns: 1fr; } .actions { justify-content: flex-start; } }

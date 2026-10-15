@@ -1,0 +1,10 @@
+#Thu Oct 15 22:50:48 CEST 2026
+base.2=/home/fpluske/Skola/IT4/rocnikovy-projekt/4--rocnikovy-projekt/quest-launcher/app/build/intermediates/dex/debug/mergeProjectDexDebug/7/classes.dex
+path.2=7/classes.dex
+base.1=/home/fpluske/Skola/IT4/rocnikovy-projekt/4--rocnikovy-projekt/quest-launcher/app/build/intermediates/dex/debug/mergeProjectDexDebug/0/classes.dex
+path.1=0/classes.dex
+base.0=/home/fpluske/Skola/IT4/rocnikovy-projekt/4--rocnikovy-projekt/quest-launcher/app/build/intermediates/dex/debug/mergeExtDexDebug/classes.dex
+renamed.2=classes3.dex
+renamed.1=classes2.dex
+renamed.0=classes.dex
+path.0=classes.dex

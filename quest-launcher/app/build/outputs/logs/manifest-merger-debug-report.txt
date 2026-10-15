@@ -1,0 +1,55 @@
+-- Merging decision tree log ---
+manifest
+ADDED from /home/fpluske/Skola/IT4/rocnikovy-projekt/4--rocnikovy-projekt/quest-launcher/app/src/main/AndroidManifest.xml:1:1-18:12
+INJECTED from /home/fpluske/Skola/IT4/rocnikovy-projekt/4--rocnikovy-projekt/quest-launcher/app/src/main/AndroidManifest.xml:1:1-18:12
+INJECTED from /home/fpluske/Skola/IT4/rocnikovy-projekt/4--rocnikovy-projekt/quest-launcher/app/src/main/AndroidManifest.xml:1:1-18:12
+INJECTED from /home/fpluske/Skola/IT4/rocnikovy-projekt/4--rocnikovy-projekt/quest-launcher/app/src/main/AndroidManifest.xml:1:1-18:12
+	package
+		INJECTED from /home/fpluske/Skola/IT4/rocnikovy-projekt/4--rocnikovy-projekt/quest-launcher/app/src/main/AndroidManifest.xml
+	android:versionName
+		INJECTED from /home/fpluske/Skola/IT4/rocnikovy-projekt/4--rocnikovy-projekt/quest-launcher/app/src/main/AndroidManifest.xml
+	android:versionCode
+		INJECTED from /home/fpluske/Skola/IT4/rocnikovy-projekt/4--rocnikovy-projekt/quest-launcher/app/src/main/AndroidManifest.xml
+	xmlns:android
+		ADDED from /home/fpluske/Skola/IT4/rocnikovy-projekt/4--rocnikovy-projekt/quest-launcher/app/src/main/AndroidManifest.xml:1:11-69
+uses-permission#android.permission.INTERNET
+ADDED from /home/fpluske/Skola/IT4/rocnikovy-projekt/4--rocnikovy-projekt/quest-launcher/app/src/main/AndroidManifest.xml:2:5-67
+	android:name
+		ADDED from /home/fpluske/Skola/IT4/rocnikovy-projekt/4--rocnikovy-projekt/quest-launcher/app/src/main/AndroidManifest.xml:2:22-64
+application
+ADDED from /home/fpluske/Skola/IT4/rocnikovy-projekt/4--rocnikovy-projekt/quest-launcher/app/src/main/AndroidManifest.xml:4:5-17:19
+INJECTED from /home/fpluske/Skola/IT4/rocnikovy-projekt/4--rocnikovy-projekt/quest-launcher/app/src/main/AndroidManifest.xml:4:5-17:19
+	android:extractNativeLibs
+		INJECTED from /home/fpluske/Skola/IT4/rocnikovy-projekt/4--rocnikovy-projekt/quest-launcher/app/src/main/AndroidManifest.xml
+	android:label
+		ADDED from /home/fpluske/Skola/IT4/rocnikovy-projekt/4--rocnikovy-projekt/quest-launcher/app/src/main/AndroidManifest.xml:6:9-36
+	android:allowBackup
+		ADDED from /home/fpluske/Skola/IT4/rocnikovy-projekt/4--rocnikovy-projekt/quest-launcher/app/src/main/AndroidManifest.xml:5:9-36
+	android:theme
+		ADDED from /home/fpluske/Skola/IT4/rocnikovy-projekt/4--rocnikovy-projekt/quest-launcher/app/src/main/AndroidManifest.xml:7:9-40
+	android:usesCleartextTraffic
+		ADDED from /home/fpluske/Skola/IT4/rocnikovy-projekt/4--rocnikovy-projekt/quest-launcher/app/src/main/AndroidManifest.xml:8:9-44
+activity#cz.orbit.quest.MainActivity
+ADDED from /home/fpluske/Skola/IT4/rocnikovy-projekt/4--rocnikovy-projekt/quest-launcher/app/src/main/AndroidManifest.xml:9:9-16:20
+	android:exported
+		ADDED from /home/fpluske/Skola/IT4/rocnikovy-projekt/4--rocnikovy-projekt/quest-launcher/app/src/main/AndroidManifest.xml:11:13-36
+	android:name
+		ADDED from /home/fpluske/Skola/IT4/rocnikovy-projekt/4--rocnikovy-projekt/quest-launcher/app/src/main/AndroidManifest.xml:10:13-41
+intent-filter#action:name:android.intent.action.MAIN+category:name:android.intent.category.LAUNCHER
+ADDED from /home/fpluske/Skola/IT4/rocnikovy-projekt/4--rocnikovy-projekt/quest-launcher/app/src/main/AndroidManifest.xml:12:13-15:29
+action#android.intent.action.MAIN
+ADDED from /home/fpluske/Skola/IT4/rocnikovy-projekt/4--rocnikovy-projekt/quest-launcher/app/src/main/AndroidManifest.xml:13:17-69
+	android:name
+		ADDED from /home/fpluske/Skola/IT4/rocnikovy-projekt/4--rocnikovy-projekt/quest-launcher/app/src/main/AndroidManifest.xml:13:25-66
+category#android.intent.category.LAUNCHER
+ADDED from /home/fpluske/Skola/IT4/rocnikovy-projekt/4--rocnikovy-projekt/quest-launcher/app/src/main/AndroidManifest.xml:14:17-77
+	android:name
+		ADDED from /home/fpluske/Skola/IT4/rocnikovy-projekt/4--rocnikovy-projekt/quest-launcher/app/src/main/AndroidManifest.xml:14:27-74
+uses-sdk
+INJECTED from /home/fpluske/Skola/IT4/rocnikovy-projekt/4--rocnikovy-projekt/quest-launcher/app/src/main/AndroidManifest.xml reason: use-sdk injection requested
+INJECTED from /home/fpluske/Skola/IT4/rocnikovy-projekt/4--rocnikovy-projekt/quest-launcher/app/src/main/AndroidManifest.xml
+INJECTED from /home/fpluske/Skola/IT4/rocnikovy-projekt/4--rocnikovy-projekt/quest-launcher/app/src/main/AndroidManifest.xml
+	android:targetSdkVersion
+		INJECTED from /home/fpluske/Skola/IT4/rocnikovy-projekt/4--rocnikovy-projekt/quest-launcher/app/src/main/AndroidManifest.xml
+	android:minSdkVersion
+		INJECTED from /home/fpluske/Skola/IT4/rocnikovy-projekt/4--rocnikovy-projekt/quest-launcher/app/src/main/AndroidManifest.xml

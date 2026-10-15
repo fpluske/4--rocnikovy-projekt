@@ -38,12 +38,14 @@ class EventType(StrEnum):
     heartbeat = "heartbeat"
     pairing_discovered = "pairing_discovered"
     pairing_confirmed = "pairing_confirmed"
+    pairing_rejected = "pairing_rejected"
 
 
 class PairingStatus(StrEnum):
     pending = "pending"
     confirmed = "confirmed"
     expired = "expired"
+    rejected = "rejected"
 
 
 class Device(Base):
