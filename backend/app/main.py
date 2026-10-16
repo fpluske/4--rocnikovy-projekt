@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 import hashlib
 
-from fastapi import Depends, FastAPI, HTTPException, Query, status
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
@@ -9,13 +9,15 @@ from sqlalchemy.orm import Session
 
 from .config import settings
 from .database import Base, engine, get_db
-from .models import AuditEvent, Command, CommandStatus, Device, EventType, PairingRequest, PairingStatus
+from .models import AuditEvent, Command, CommandStatus, Device, DeviceStatus, EventType, PairingRequest, PairingStatus
 from .schemas import (
-    CommandCreate, CommandRead, DeviceCreate, DeviceRead, EventRead, HealthRead,
+    CommandCreate, CommandRead, DeviceCreate, DeviceHeartbeat, DeviceRead, EventRead, HealthRead,
     PairingConfirm, PairingDiscovery, PairingRead,
 )
 
 Base.metadata.create_all(bind=engine)
+
+DEVICE_OFFLINE_AFTER = timedelta(seconds=30)
 
 app = FastAPI(title="Orbit Quest Management API", version="0.1.0")
 app.add_middleware(
@@ -38,7 +40,17 @@ def health(db: Session = Depends(get_db)) -> HealthRead:
 
 @app.get("/api/devices", response_model=list[DeviceRead], tags=["devices"])
 def list_devices(db: Session = Depends(get_db)) -> list[Device]:
-    return list(db.scalars(select(Device).order_by(Device.created_at.desc())))
+    now = utc_now()
+    devices = list(db.scalars(select(Device).order_by(Device.created_at.desc())))
+    changed = False
+    for device in devices:
+        if device.last_seen_at is not None and as_utc(device.last_seen_at) + DEVICE_OFFLINE_AFTER < now:
+            if device.status != DeviceStatus.offline:
+                device.status = DeviceStatus.offline
+                changed = True
+    if changed:
+        db.commit()
+    return devices
 
 
 def pin_digest(nonce: str, pin: str) -> str:
@@ -98,6 +110,18 @@ def discover_device(data: PairingDiscovery, db: Session = Depends(get_db)) -> Pa
     return pairing
 
 
+@app.get("/api/pairing/{pairing_id}", response_model=PairingRead, tags=["pairing"])
+def get_pairing(pairing_id: str, db: Session = Depends(get_db)) -> PairingRequest:
+    pairing = db.get(PairingRequest, pairing_id)
+    if pairing is None:
+        raise HTTPException(status_code=404, detail="Pairing žádost nebyla nalezena.")
+    if pairing.status == PairingStatus.pending and as_utc(pairing.expires_at) < utc_now():
+        pairing.status = PairingStatus.expired
+        db.commit()
+        db.refresh(pairing)
+    return pairing
+
+
 @app.post("/api/pairing/{pairing_id}/confirm", response_model=DeviceRead, tags=["pairing"])
 def confirm_pairing(pairing_id: str, data: PairingConfirm, db: Session = Depends(get_db)) -> Device:
     pairing = db.get(PairingRequest, pairing_id)
@@ -150,6 +174,28 @@ def create_device(data: DeviceCreate, db: Session = Depends(get_db)) -> Device:
     except IntegrityError as error:
         db.rollback()
         raise HTTPException(status_code=409, detail="Zařízení s tímto sériovým číslem již existuje.") from error
+    db.refresh(device)
+    return device
+
+
+@app.post("/api/devices/heartbeat", response_model=DeviceRead, tags=["devices"])
+def heartbeat(
+    data: DeviceHeartbeat,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> Device:
+    device = db.scalar(select(Device).where(Device.serial_number == data.serial_number))
+    if device is None:
+        raise HTTPException(status_code=404, detail="Zařízení nebylo nalezeno.")
+    device.status = DeviceStatus.online
+    device.last_seen_at = utc_now()
+    device.battery_percent = data.battery_percent
+    device.firmware_version = data.firmware_version
+    device.current_app = data.current_app
+    if request.client is not None:
+        device.ip_address = request.client.host
+    db.add(AuditEvent(device=device, type=EventType.heartbeat, message=f"Heartbeat zařízení {device.name}."))
+    db.commit()
     db.refresh(device)
     return device
 

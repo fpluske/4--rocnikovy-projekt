@@ -59,18 +59,27 @@ nebo později přes autentizovaný Quest agent.
 - `GET /api/health`
 - `GET /api/devices`
 - `POST /api/devices`
+- `POST /api/devices/heartbeat`
 - `DELETE /api/devices/{device_id}`
 - `GET /api/devices/{device_id}/commands`
 - `POST /api/devices/{device_id}/commands`
 - `GET /api/events`
 - `GET /api/pairing`
 - `POST /api/pairing/discover`
+- `GET /api/pairing/{pairing_id}`
 - `POST /api/pairing/{pairing_id}/confirm`
 - `POST /api/pairing/{pairing_id}/reject`
 
-Autentizace, skutečné doručování příkazů agentovi, heartbeat a PostgreSQL jsou
-navazující kroky. Připojení k PostgreSQL lze připravit nastavením `DATABASE_URL`;
+Autentizace, skutečné doručování příkazů agentovi a PostgreSQL jsou navazující
+kroky. Připojení k PostgreSQL lze připravit nastavením `DATABASE_URL`;
 výchozí hodnota je `sqlite:///./data/orbit.db`.
+
+Při prvním spuštění si aplikace zapamatuje URL backendu a ID párovací žádosti.
+Po potvrzení PINu ve webu uloží stav jako spárovaný. Při dalších spuštěních se
+automaticky připojí k uloženému backendu bez nového párování. Spárovaný Quest
+agent posílá heartbeat každých deset sekund. Zařízení je po úspěšném heartbeatu
+označeno jako `online`; pokud backend neobdrží heartbeat déle než třicet sekund,
+dashboard jej při dalším načtení označí jako `offline`.
 
 ## Párovací flow
 

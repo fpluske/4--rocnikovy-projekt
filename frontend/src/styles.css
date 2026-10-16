@@ -39,5 +39,7 @@ button:hover { filter: brightness(.96); }
 .status { padding: 4px 8px; border-radius: 20px; font-size: .75rem; font-weight: 800; text-transform: uppercase; }
 .status.unknown { color: #6b5b20; background: #fff2bd; }
 .status.online { color: #176b4a; background: #d9f5e7; }
+.status.offline { color: #8a3434; background: #fbe1e1; }
+.last-seen { margin-top: 8px; color: #8b969f; font-size: .78rem !important; }
 .actions { flex-wrap: wrap; justify-content: flex-end; }
 @media (max-width: 760px) { header, .device { align-items: flex-start; flex-direction: column; } .header-actions, .pairing-actions { width: 100%; justify-content: flex-start; } .layout { grid-template-columns: 1fr; } .actions { justify-content: flex-start; } }

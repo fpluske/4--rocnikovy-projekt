@@ -25,6 +25,13 @@ class DeviceRead(DeviceCreate):
     model_config = ConfigDict(from_attributes=True)
 
 
+class DeviceHeartbeat(BaseModel):
+    serial_number: str = Field(min_length=1, max_length=120)
+    battery_percent: int | None = Field(default=None, ge=0, le=100)
+    firmware_version: str | None = Field(default=None, max_length=80)
+    current_app: str | None = Field(default=None, max_length=200)
+
+
 class CommandCreate(BaseModel):
     type: CommandType
     payload: dict | None = None
