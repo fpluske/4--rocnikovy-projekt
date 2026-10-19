@@ -18,6 +18,10 @@ Webová aplikace bude dostupná na <http://localhost:8080>, API dokumentace na
 <http://localhost:8000/docs> a kontrola dostupnosti backendu na
 <http://localhost:8000/api/health>.
 
+Dashboard v hlavičce zobrazuje, jestli je backend dostupný. Stav se ověřuje
+při načtení a každých deset sekund; při nedostupnosti zůstává poslední načtený
+seznam zařízení zobrazený a indikátor se přepne na „Server odpojen“.
+
 Pro zastavení:
 
 ```bash
@@ -69,6 +73,7 @@ nebo později přes autentizovaný Quest agent.
 - `GET /api/pairing/{pairing_id}`
 - `POST /api/pairing/{pairing_id}/confirm`
 - `POST /api/pairing/{pairing_id}/reject`
+- `WS /api/webrtc/{device_id}` – WebRTC signalizační relay pro živý obraz
 
 Autentizace, skutečné doručování příkazů agentovi a PostgreSQL jsou navazující
 kroky. Připojení k PostgreSQL lze připravit nastavením `DATABASE_URL`;
@@ -77,7 +82,8 @@ výchozí hodnota je `sqlite:///./data/orbit.db`.
 Při prvním spuštění si aplikace zapamatuje URL backendu a ID párovací žádosti.
 Po potvrzení PINu ve webu uloží stav jako spárovaný. Při dalších spuštěních se
 automaticky připojí k uloženému backendu bez nového párování. Spárovaný Quest
-agent posílá heartbeat každých deset sekund. Zařízení je po úspěšném heartbeatu
+agent posílá heartbeat každých deset sekund a přímo v aplikaci zobrazuje, zda
+server odpověděl. Zařízení je po úspěšném heartbeatu
 označeno jako `online`; pokud backend neobdrží heartbeat déle než třicet sekund,
 dashboard jej při dalším načtení označí jako `offline`.
 
@@ -91,3 +97,12 @@ dashboard jej při dalším načtení označí jako `offline`.
 
 V aktuálním prototypu je discovery dostupné přes `POST /api/pairing/discover`;
 UDP broadcast/multicast transport bude napojen později na stejný endpoint.
+
+## Živý obraz headsetu
+
+Dashboard obsahuje u online zařízení tlačítko **Živě**. Prohlížeč naváže
+WebRTC spojení přes signalizační WebSocket a Android aplikace po systémovém
+potvrzení sdílení obrazovky odešle aktuální obraz headsetu. Backend pouze
+přeposílá WebRTC SDP a ICE zprávy; obrazová data přes něj neprocházejí.
+Před použitím živého obrazu musí být headset online a aplikace musí být
+spárovaná se stejným backendem.

@@ -2,6 +2,7 @@ from datetime import datetime, timedelta, timezone
 import hashlib
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
+from fastapi import WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
@@ -27,6 +28,29 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+webrtc_connections: dict[str, set[WebSocket]] = {}
+
+
+@app.websocket("/api/webrtc/{device_id}")
+async def webrtc_signaling(device_id: str, websocket: WebSocket) -> None:
+    await websocket.accept()
+    connections = webrtc_connections.setdefault(device_id, set())
+    connections.add(websocket)
+    try:
+        while True:
+            message = await websocket.receive_text()
+            for peer in tuple(connections):
+                if peer is not websocket:
+                    try:
+                        await peer.send_text(message)
+                    except (RuntimeError, WebSocketDisconnect):
+                        connections.discard(peer)
+    except WebSocketDisconnect:
+        connections.discard(websocket)
+    finally:
+        if not connections:
+            webrtc_connections.pop(device_id, None)
 
 
 @app.get("/api/health", response_model=HealthRead, tags=["system"])

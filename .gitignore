@@ -27,3 +27,27 @@ backend/data/
 .ruff_cache/
 .coverage
 .DS_Store
+
+# Android and Gradle
+.gradle/
+**/build/
+local.properties
+*.iml
+.idea/
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Java and Kotlin
+*.class
+hs_err_pid*
+
+# Test and coverage reports
+htmlcov/
+.tox/
+.nox/
+
+# Logs and temporary files
+*.log
+*.tmp
+*.swp
