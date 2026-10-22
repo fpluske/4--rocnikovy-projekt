@@ -125,52 +125,91 @@ function LiveView({ device, onClose }) {
   const [connectionState, setConnectionState] = useState("Připojuji živý obraz…");
 
   useEffect(() => {
-    const peer = new RTCPeerConnection({
-      iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-    });
-    const socket = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/webrtc/${encodeURIComponent(device.serial_number)}`);
+    let cancelled = false;
+    let peer;
+    let socket;
     const pendingCandidates = [];
     let remoteDescriptionSet = false;
-    peer.addTransceiver("video", { direction: "recvonly" });
-    peer.ontrack = (event) => {
-      const stream = event.streams[0] || new MediaStream([event.track]);
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.play().catch(() => setConnectionState("Klikněte do obrazu pro spuštění videa"));
+    const connect = async () => {
+      try {
+        const configResponse = await fetch("/api/webrtc/config");
+        if (!configResponse.ok) throw new Error(`Konfigurace ICE selhala (HTTP ${configResponse.status}).`);
+        const { ice_servers: iceServers } = await configResponse.json();
+        if (cancelled) return;
+        peer = new RTCPeerConnection({ iceServers, iceCandidatePoolSize: 10 });
+        socket = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/webrtc/${encodeURIComponent(device.serial_number)}`);
+        peer.addTransceiver("video", { direction: "recvonly" });
+        peer.ontrack = (event) => {
+          const stream = event.streams[0] || new MediaStream([event.track]);
+          if (videoRef.current) {
+            videoRef.current.srcObject = stream;
+            videoRef.current.play().catch(() => setConnectionState("Klikněte do obrazu pro spuštění videa"));
+          }
+          setConnectionState("Přijímám živý obraz");
+        };
+        peer.onicecandidate = (event) => {
+          if (event.candidate && socket.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify({ type: "candidate", candidate: event.candidate.toJSON() }));
+          }
+        };
+        peer.onicecandidateerror = (event) => console.warn("WebRTC ICE candidate error", event);
+        peer.oniceconnectionstatechange = () => {
+          console.info("WebRTC ICE state:", peer.iceConnectionState);
+          if (peer.iceConnectionState === "failed") setConnectionState("ICE spojení selhalo. Zkontrolujte TURN server nebo síť.");
+          else if (peer.iceConnectionState !== "connected" && peer.iceConnectionState !== "completed") setConnectionState(`ICE: ${peer.iceConnectionState}`);
+        };
+        peer.onconnectionstatechange = () => {
+          console.info("WebRTC connection state:", peer.connectionState);
+          if (peer.connectionState === "connected") setConnectionState("Živý obraz");
+          else if (peer.connectionState === "failed") setConnectionState("WebRTC spojení selhalo.");
+        };
+        socket.onopen = async () => {
+          try {
+            socket.send(JSON.stringify({ type: "viewer" }));
+            const offer = await peer.createOffer();
+            await peer.setLocalDescription(offer);
+            socket.send(JSON.stringify({ type: "offer", sdp: offer.sdp }));
+          } catch (error) {
+            console.error("WebRTC offer failed", error);
+            setConnectionState(`Offer selhal: ${error.message}`);
+          }
+        };
+        socket.onmessage = async ({ data }) => {
+          try {
+            const message = JSON.parse(data);
+            if (message.type === "error") {
+              setConnectionState(message.message || "Android odmítl WebRTC spojení.");
+              return;
+            }
+            if (message.type === "answer") {
+              await peer.setRemoteDescription({ type: "answer", sdp: message.sdp });
+              remoteDescriptionSet = true;
+              while (pendingCandidates.length > 0) await peer.addIceCandidate(pendingCandidates.shift());
+            }
+            if (message.type === "candidate" && message.candidate) {
+              if (remoteDescriptionSet) await peer.addIceCandidate(message.candidate);
+              else pendingCandidates.push(message.candidate);
+            }
+          } catch (error) {
+            console.error("WebRTC signal processing failed", error);
+            setConnectionState(`Signalizace selhala: ${error.message}`);
+          }
+        };
+        socket.onerror = () => setConnectionState("Signalizační WebSocket není dostupný.");
+        socket.onclose = () => {
+          if (!cancelled) setConnectionState("Spojení živého obrazu bylo ukončeno.");
+        };
+      } catch (error) {
+        console.error("WebRTC setup failed", error);
+        setConnectionState(error.message);
       }
-      setConnectionState("Přijímám živý obraz");
     };
-    peer.onicecandidate = (event) => {
-      if (event.candidate && socket.readyState === WebSocket.OPEN) {
-        socket.send(JSON.stringify({ type: "candidate", candidate: event.candidate }));
-      }
-    };
-    peer.oniceconnectionstatechange = () => setConnectionState(`ICE: ${peer.iceConnectionState}`);
-    peer.onconnectionstatechange = () => setConnectionState(peer.connectionState === "connected" ? "Živý obraz" : `Stav: ${peer.connectionState}`);
-    socket.onopen = async () => {
-      socket.send(JSON.stringify({ type: "viewer" }));
-      const offer = await peer.createOffer();
-      await peer.setLocalDescription(offer);
-      socket.send(JSON.stringify({ type: "offer", sdp: offer.sdp }));
-    };
-    socket.onmessage = async ({ data }) => {
-      const message = JSON.parse(data);
-      if (message.type === "answer") {
-        await peer.setRemoteDescription({ type: "answer", sdp: message.sdp });
-        remoteDescriptionSet = true;
-        while (pendingCandidates.length > 0) await peer.addIceCandidate(pendingCandidates.shift());
-      }
-      if (message.type === "candidate" && message.candidate) {
-        if (remoteDescriptionSet) await peer.addIceCandidate(message.candidate);
-        else pendingCandidates.push(message.candidate);
-      }
-    };
-    socket.onerror = () => setConnectionState("Živý obraz není dostupný.");
-    socket.onclose = () => setConnectionState("Spojení živého obrazu bylo ukončeno.");
+    connect();
     return () => {
-      if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "hangup" }));
-      socket.close();
-      peer.close();
+      cancelled = true;
+      if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "hangup" }));
+      socket?.close();
+      peer?.close();
     };
   }, [device.id]);
 

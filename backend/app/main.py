@@ -53,6 +53,11 @@ async def webrtc_signaling(device_id: str, websocket: WebSocket) -> None:
             webrtc_connections.pop(device_id, None)
 
 
+@app.get("/api/webrtc/config", tags=["webrtc"])
+def webrtc_config() -> dict[str, list[dict]]:
+    return {"ice_servers": settings.webrtc_ice_server_list}
+
+
 @app.get("/api/health", response_model=HealthRead, tags=["system"])
 def health(db: Session = Depends(get_db)) -> HealthRead:
     try:

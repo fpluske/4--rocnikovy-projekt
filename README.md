@@ -74,6 +74,7 @@ nebo později přes autentizovaný Quest agent.
 - `POST /api/pairing/{pairing_id}/confirm`
 - `POST /api/pairing/{pairing_id}/reject`
 - `WS /api/webrtc/{device_id}` – WebRTC signalizační relay pro živý obraz
+- `GET /api/webrtc/config` – ICE/STUN/TURN konfigurace pro WebRTC klienty
 
 Autentizace, skutečné doručování příkazů agentovi a PostgreSQL jsou navazující
 kroky. Připojení k PostgreSQL lze připravit nastavením `DATABASE_URL`;
@@ -106,3 +107,13 @@ potvrzení sdílení obrazovky odešle aktuální obraz headsetu. Backend pouze
 přeposílá WebRTC SDP a ICE zprávy; obrazová data přes něj neprocházejí.
 Před použitím živého obrazu musí být headset online a aplikace musí být
 spárovaná se stejným backendem.
+
+Pro sítě, ve kterých přímé ICE spojení neprojde, nastavte TURN server přes
+proměnnou `WEBRTC_ICE_SERVERS`. Hodnota je JSON pole kompatibilní s konfigurací
+`RTCPeerConnection`, například:
+
+```text
+WEBRTC_ICE_SERVERS=[{"urls":["stun:turn.example.com:3478","turn:turn.example.com:3478?transport=udp","turns:turn.example.com:5349?transport=tcp"],"username":"user","credential":"password"}]
+```
+
+Android aplikace i web si tuto konfiguraci načtou z `/api/webrtc/config`.

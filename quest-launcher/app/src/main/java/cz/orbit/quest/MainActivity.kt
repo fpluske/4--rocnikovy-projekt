@@ -97,6 +97,9 @@ class MainActivity : Activity() {
     private var stoppingCapture = false
     private var screenCaptureServiceReady = false
     private var peerFactory: PeerConnectionFactory? = null
+    private var iceServers = listOf(
+        PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer()
+    )
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -178,7 +181,7 @@ class MainActivity : Activity() {
             pendingPairingId() != null -> pairingHandler.post(pairingPollTask)
             else -> window.decorView.postDelayed({ sendDiscovery() }, 500)
         }
-        if (isPaired()) connectSignaling()
+        if (isPaired()) loadIceServersAndConnect()
     }
 
     override fun onStop() {
@@ -201,6 +204,8 @@ class MainActivity : Activity() {
         if (requestCode != SCREEN_CAPTURE_REQUEST || resultCode != RESULT_OK || data == null) {
             pendingOffer = null
             pendingCapture = null
+            pendingRemoteCandidates.clear()
+            remoteDescriptionReady = false
             stopService(Intent(this, ScreenCaptureForegroundService::class.java))
             screenCaptureServiceReady = false
             return
@@ -261,6 +266,46 @@ class MainActivity : Activity() {
         })
     }
 
+    private fun loadIceServersAndConnect() {
+        val baseUrl = preferences.getString(PAIRED_BACKEND_URL, null).orEmpty()
+        if (baseUrl.isBlank()) return
+        thread {
+            try {
+                val connection = (URI("$baseUrl/api/webrtc/config").toURL()
+                    .openConnection() as HttpURLConnection).apply {
+                    connectTimeout = 5000
+                    readTimeout = 5000
+                }
+                val code = connection.responseCode
+                if (code !in 200..299) throw IOException("Backend vrátil HTTP $code.")
+                val servers = JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
+                    .getJSONArray("ice_servers")
+                val parsed = (0 until servers.length()).map { index ->
+                    val server = servers.getJSONObject(index)
+                    val urls = server.get("urls")
+                    val builder = if (urls is org.json.JSONArray) {
+                        PeerConnection.IceServer.builder((0 until urls.length()).map { urls.getString(it) })
+                    } else {
+                        PeerConnection.IceServer.builder(urls.toString())
+                    }
+                    if (server.has("username")) builder.setUsername(server.getString("username"))
+                    if (server.has("credential")) builder.setPassword(server.getString("credential"))
+                    builder.createIceServer()
+                }
+                if (parsed.isNotEmpty()) iceServers = parsed
+                connection.disconnect()
+            } catch (error: IOException) {
+                Log.w("OrbitQuest", "Konfigurace ICE se nepodařila načíst, používám STUN.", error)
+            } catch (error: JSONException) {
+                Log.w("OrbitQuest", "Konfigurace ICE má neplatný formát, používám STUN.", error)
+            } catch (error: URISyntaxException) {
+                Log.w("OrbitQuest", "URL konfigurace ICE není platná.", error)
+            } finally {
+                runOnUiThread { connectSignaling() }
+            }
+        }
+    }
+
     private fun startScreenCaptureService() {
         val serviceIntent = Intent(this, ScreenCaptureForegroundService::class.java)
         ScreenCaptureForegroundService.onForegroundReady = {
@@ -311,11 +356,7 @@ class MainActivity : Activity() {
             return
         }
         val videoTrack = factory.createVideoTrack("screen", videoSource)
-        val configuration = PeerConnection.RTCConfiguration(
-            listOf(
-                PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer()
-            )
-        )
+        val configuration = PeerConnection.RTCConfiguration(iceServers)
         peerConnection = factory.createPeerConnection(configuration, object : PeerConnection.Observer {
             override fun onIceCandidate(candidate: org.webrtc.IceCandidate) {
                 signalingSocket?.send("""{"type":"candidate","candidate":{"sdpMid":${json(candidate.sdpMid ?: "")},"sdpMLineIndex":${candidate.sdpMLineIndex},"candidate":${json(candidate.sdp)}}}""")
@@ -347,9 +388,21 @@ class MainActivity : Activity() {
                             override fun onSetSuccess() {
                                 signalingSocket?.send("""{"type":"answer","sdp":${json(description.description)}}""")
                             }
+                            override fun onSetFailure(error: String) {
+                                sendWebRtcError("Nastavení lokálního SDP selhalo: $error")
+                                super.onSetFailure(error)
+                            }
                         }, description)
                     }
+                    override fun onCreateFailure(error: String) {
+                        sendWebRtcError("Vytvoření SDP odpovědi selhalo: $error")
+                        super.onCreateFailure(error)
+                    }
                 }, MediaConstraints())
+            }
+            override fun onSetFailure(error: String) {
+                sendWebRtcError("Nastavení vzdáleného SDP selhalo: $error")
+                super.onSetFailure(error)
             }
         }, offer)
     }
@@ -375,8 +428,15 @@ class MainActivity : Activity() {
             }
             screenCaptureServiceReady = false
             pendingCapture = null
+            pendingRemoteCandidates.clear()
+            remoteDescriptionReady = false
             stoppingCapture = false
         }
+    }
+
+    private fun sendWebRtcError(message: String) {
+        signalingSocket?.send("""{"type":"error","message":${json(message)}}""")
+        runOnUiThread { status.text = "Stav: $message" }
     }
 
     private fun sendDiscovery() {
@@ -496,7 +556,7 @@ class MainActivity : Activity() {
             status.text = "Stav: headset je spárovaný a připojený."
             updatePairingControls()
             heartbeatHandler.post(heartbeatTask)
-            connectSignaling()
+            loadIceServersAndConnect()
         }
     }
 
@@ -598,7 +658,7 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun json(value: String) = "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+    private fun json(value: String) = JSONObject.quote(value)
 
     private abstract class SdpObserver : org.webrtc.SdpObserver {
         override fun onCreateFailure(error: String) {
