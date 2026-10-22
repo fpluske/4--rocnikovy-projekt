@@ -34,6 +34,12 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [serverStatus, setServerStatus] = useState("unknown");
   const [liveDevice, setLiveDevice] = useState(null);
+  const [darkMode, setDarkMode] = useState(() => localStorage.getItem("orbit-theme") === "dark");
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = darkMode ? "dark" : "light";
+    localStorage.setItem("orbit-theme", darkMode ? "dark" : "light");
+  }, [darkMode]);
 
   const loadDevices = async () => {
     setLoading(true);
@@ -109,7 +115,7 @@ function App() {
   const openLiveView = (device) => setLiveDevice(device);
 
   return <main>
-    <header><div><p className="eyebrow">ORBIT / PROTOTYP</p><h1>Správa Quest headsetů</h1><p className="muted">Přehled zařízení a čekajících párování.</p></div><div className="header-actions"><span className={`server-connection ${serverStatus}`}><span className="connection-dot" />{connectionLabels[serverStatus]}</span><button className="secondary" onClick={loadDevices}>Obnovit</button><button className="primary pairing-button" onClick={() => setPairingOpen(true)}>Párovat zařízení</button></div></header>
+    <header><div><p className="eyebrow">ORBIT / PROTOTYP</p><h1>Správa Quest headsetů</h1><p className="muted">Přehled zařízení a čekajících párování.</p></div><div className="header-actions"><span className={`server-connection ${serverStatus}`}><span className="connection-dot" />{connectionLabels[serverStatus]}</span><button className="secondary theme-button" onClick={() => setDarkMode((current) => !current)} aria-pressed={darkMode}>{darkMode ? "Světlý režim" : "Tmavý režim"}</button><button className="secondary" onClick={loadDevices}>Obnovit</button><button className="primary pairing-button" onClick={() => setPairingOpen(true)}>Párovat zařízení</button></div></header>
     {message && <div className="notice">{message}</div>}
     {pairingOpen && <section className="card pairing-form-card"><div className="section-heading"><div><p className="eyebrow">NOVÉ ZAŘÍZENÍ</p><h2>Spustit párování</h2></div><button className="close-button" onClick={() => setPairingOpen(false)} aria-label="Zavřít">×</button></div><p className="muted">V prototypu zde simulujete discovery packet z aplikace headsetu.</p><form className="pairing-form" onSubmit={discoverDevice}><label>Název headsetu<input required autoFocus value={pairingForm.name} onChange={(e) => setPairingForm({ ...pairingForm, name: e.target.value })} placeholder="Např. Quest učebna 1" /></label><label>Sériové číslo<input required value={pairingForm.serial_number} onChange={(e) => setPairingForm({ ...pairingForm, serial_number: e.target.value })} /></label><label>PIN z headsetu<input required inputMode="numeric" pattern="[0-9]{4}" maxLength="4" value={pairingForm.pin} onChange={(e) => setPairingForm({ ...pairingForm, pin: e.target.value.replace(/\D/g, "") })} placeholder="4 číslice" /></label><div className="form-actions"><button type="button" onClick={() => setPairingOpen(false)}>Zrušit</button><button className="primary">Odeslat discovery</button></div></form></section>}
     {pairings.length > 0 && <section className="card pairing-card"><div className="section-heading"><h2>Čekající párování</h2><span>{pairings.length} nové</span></div>{pairings.map((pairing) => <article className="device" key={pairing.id}><div><h3>{pairing.name}</h3><p className="muted">{pairing.model} · {pairing.serial_number}</p><span className="status unknown">čeká na potvrzení</span></div><div className="pairing-actions"><button className="primary" onClick={() => confirmPairing(pairing)}>Potvrdit PINem</button><button className="danger" onClick={() => rejectPairing(pairing)}>Odmítnout</button></div></article>)}</section>}
@@ -123,6 +129,28 @@ function App() {
 function LiveView({ device, onClose }) {
   const videoRef = useRef(null);
   const [connectionState, setConnectionState] = useState("Připojuji živý obraz…");
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  useEffect(() => {
+    const handleFullscreenChange = () => setIsFullscreen(document.fullscreenElement === videoRef.current);
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
+  }, []);
+
+  const toggleFullscreen = async () => {
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen();
+      } else if (videoRef.current?.requestFullscreen) {
+        await videoRef.current.requestFullscreen();
+      } else {
+        setConnectionState("Celou obrazovku tento prohlížeč nepodporuje.");
+      }
+    } catch (error) {
+      console.error("Fullscreen failed", error);
+      setConnectionState("Obraz se nepodařilo zobrazit na celou obrazovku.");
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -213,7 +241,7 @@ function LiveView({ device, onClose }) {
     };
   }, [device.id]);
 
-  return <div className="live-backdrop"><section className="live-modal"><div className="section-heading"><div><p className="eyebrow">ŽIVÝ OBRAZ</p><h2>{device.name}</h2></div><button className="close-button" onClick={onClose} aria-label="Zavřít">×</button></div><video ref={videoRef} autoPlay muted playsInline controls={false} onError={() => setConnectionState("Prohlížeč nedokázal přehrát obraz")} /><p className="muted">{connectionState}</p></section></div>;
+  return <div className="live-backdrop"><section className="live-modal"><div className="section-heading"><div><p className="eyebrow">ŽIVÝ OBRAZ</p><h2>{device.name}</h2></div><div className="live-actions"><button className="secondary" onClick={toggleFullscreen}>{isFullscreen ? "Ukončit celou obrazovku" : "Celá obrazovka"}</button><button className="close-button" onClick={onClose} aria-label="Zavřít">×</button></div></div><video ref={videoRef} autoPlay muted playsInline controls={false} onError={() => setConnectionState("Prohlížeč nedokázal přehrát obraz")} /><p className="muted">{connectionState}</p></section></div>;
 }
 
 createRoot(document.getElementById("root")).render(<App />);
