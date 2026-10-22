@@ -1,7 +1,0 @@
-cz.orbit.quest.app-pngs-0 /home/fpluske/Skola/IT4/rocnikovy-projekt/4--rocnikovy-projekt/quest-launcher/app/build/generated/res/pngs/debug
-cz.orbit.quest.app-resValues-1 /home/fpluske/Skola/IT4/rocnikovy-projekt/4--rocnikovy-projekt/quest-launcher/app/build/generated/res/resValues/debug
-cz.orbit.quest.app-packageDebugResources-2 /home/fpluske/Skola/IT4/rocnikovy-projekt/4--rocnikovy-projekt/quest-launcher/app/build/intermediates/incremental/debug/packageDebugResources/merged.dir
-cz.orbit.quest.app-packageDebugResources-3 /home/fpluske/Skola/IT4/rocnikovy-projekt/4--rocnikovy-projekt/quest-launcher/app/build/intermediates/incremental/debug/packageDebugResources/stripped.dir
-cz.orbit.quest.app-debug-4 /home/fpluske/Skola/IT4/rocnikovy-projekt/4--rocnikovy-projekt/quest-launcher/app/build/intermediates/merged_res/debug/mergeDebugResources
-cz.orbit.quest.app-debug-5 /home/fpluske/Skola/IT4/rocnikovy-projekt/4--rocnikovy-projekt/quest-launcher/app/src/debug/res
-cz.orbit.quest.app-main-6 /home/fpluske/Skola/IT4/rocnikovy-projekt/4--rocnikovy-projekt/quest-launcher/app/src/main/res

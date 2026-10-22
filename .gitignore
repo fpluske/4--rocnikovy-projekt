@@ -51,3 +51,4 @@ htmlcov/
 *.log
 *.tmp
 *.swp
+.vscode/
