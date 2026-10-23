@@ -2,6 +2,11 @@
 
 Minimální Android aplikace pro první spárování headsetu s Orbit backendem.
 
+Aplikace obsahuje `DeviceAdminReceiver`, takže ji lze při provisioningu nastavit
+jako device owner. Samotné přidání receiveru nemění oprávnění aplikace; device
+owner se nastavuje pouze během úvodního nastavení zařízení nebo podporovaným
+enterprise provisioningem.
+
 ## Spuštění
 
 Otevři adresář `quest-launcher` v Android Studiu a spusť aplikaci na Questu.
@@ -12,6 +17,31 @@ http://192.168.1.10:8000
 ```
 
 `localhost` ani `127.0.0.1` na headsetu neodkazují na počítač s backendem.
+
+## Device owner provisioning
+
+Po sestavení a instalaci APK lze ověřit dostupnost admin komponenty:
+
+```bash
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+adb shell dumpsys package cz.orbit.quest | grep -A 10 -B 5 DeviceAdmin
+```
+
+Na čistém, dosud neprovisionovaném zařízení lze aplikaci nastavit jako device
+owner:
+
+```bash
+adb shell dpm set-device-owner \
+  cz.orbit.quest/.OrbitDeviceAdminReceiver
+```
+
+Pokud zařízení už dokončilo úvodní nastavení (`device_provisioned=1`), Android
+obvykle vyžaduje factory reset nebo enterprise provisioning. Smazání Meta účtu
+tento stav samo o sobě nezmění. Stav ownera lze ověřit příkazem:
+
+```bash
+adb shell dpm list-owners
+```
 
 Aplikace odešle:
 

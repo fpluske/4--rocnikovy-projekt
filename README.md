@@ -103,8 +103,12 @@ UDP broadcast/multicast transport bude napojen později na stejný endpoint.
 
 Dashboard obsahuje u online zařízení tlačítko **Živě**. Prohlížeč naváže
 WebRTC spojení přes signalizační WebSocket a Android aplikace po systémovém
-potvrzení sdílení obrazovky odešle aktuální obraz headsetu. Backend pouze
+potvrzení sdílení obrazovky odešle aktuální obraz headsetu. Tlačítko lze použít
+u více zařízení a všechny vybrané přenosy se zobrazí současně v galerii; každý
+přenos lze samostatně ukončit nebo otevřít na celou obrazovku. Backend pouze
 přeposílá WebRTC SDP a ICE zprávy; obrazová data přes něj neprocházejí.
+V seznamu zařízení lze přenosy předem vybrat zaškrtávacími políčky a následně
+je spustit jedním tlačítkem; dostupná je také rychlá volba všech online headsetů.
 Před použitím živého obrazu musí být headset online a aplikace musí být
 spárovaná se stejným backendem.
 
