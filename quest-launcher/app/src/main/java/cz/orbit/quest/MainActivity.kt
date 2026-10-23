@@ -1,6 +1,8 @@
 package cz.orbit.quest
 
 import android.app.Activity
+import android.app.admin.DevicePolicyManager
+import android.content.ComponentName
 import android.content.SharedPreferences
 import android.content.Context
 import android.content.Intent
@@ -13,6 +15,7 @@ import android.view.Gravity
 import android.view.View
 import android.widget.Button
 import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -48,6 +51,7 @@ import org.webrtc.SurfaceTextureHelper
 class MainActivity : Activity() {
     private companion object {
         const val HEARTBEAT_INTERVAL_MS = 10_000L
+        const val COMMAND_POLL_INTERVAL_MS = 5_000L
         const val PAIRING_POLL_INTERVAL_MS = 3_000L
         const val PREFS = "orbit_quest"
         const val PAIRED_BACKEND_URL = "paired_backend_url"
@@ -56,6 +60,7 @@ class MainActivity : Activity() {
         const val PAIRING_PIN = "pairing_pin"
         const val PAIRING_NONCE = "pairing_nonce"
         const val DEVICE_NAME = "device_name"
+        const val LOCKED = "locked"
         const val SCREEN_CAPTURE_REQUEST = 1001
     }
 
@@ -69,6 +74,7 @@ class MainActivity : Activity() {
     private lateinit var resetButton: Button
     private lateinit var pairingPinLabel: TextView
     private lateinit var pairingPinText: TextView
+    private lateinit var lockOverlay: TextView
     private val heartbeatHandler = Handler(Looper.getMainLooper())
     private val pairingHandler = Handler(Looper.getMainLooper())
     private val heartbeatInFlight = AtomicBoolean(false)
@@ -77,6 +83,12 @@ class MainActivity : Activity() {
         override fun run() {
             sendHeartbeat()
             heartbeatHandler.postDelayed(this, HEARTBEAT_INTERVAL_MS)
+        }
+    }
+    private val commandTask = object : Runnable {
+        override fun run() {
+            pollCommands()
+            heartbeatHandler.postDelayed(this, COMMAND_POLL_INTERVAL_MS)
         }
     }
     private val serialNumber by lazy {
@@ -92,6 +104,7 @@ class MainActivity : Activity() {
     private var surfaceTextureHelper: SurfaceTextureHelper? = null
     private var pendingOffer: SessionDescription? = null
     private var pendingCapture: Pair<SessionDescription, Intent>? = null
+    private var screenCapturePermission: Intent? = null
     private val pendingRemoteCandidates = mutableListOf<org.webrtc.IceCandidate>()
     private var remoteDescriptionReady = false
     private var stoppingCapture = false
@@ -170,14 +183,33 @@ class MainActivity : Activity() {
         })
         status.setPadding(0, 24, 0, 0)
         root.addView(status)
-        setContentView(scroll)
+        lockOverlay = TextView(this).apply {
+            text = "ORBIT QUEST\n\nZařízení je uzamčené.\nOdemknout lze pouze z webové administrace."
+            textSize = 24f
+            gravity = Gravity.CENTER
+            setTextColor(0xffffffff.toInt())
+            setBackgroundColor(0xff101820.toInt())
+            isClickable = true
+            visibility = View.GONE
+        }
+        val content = FrameLayout(this).apply {
+            addView(scroll, FrameLayout.LayoutParams(-1, -1))
+            addView(lockOverlay, FrameLayout.LayoutParams(-1, -1))
+        }
+        setContentView(content)
         updatePairingControls()
+        if (preferences.getBoolean(LOCKED, false)) {
+            window.decorView.post { enterKioskMode() }
+        }
     }
 
     override fun onStart() {
         super.onStart()
         when {
-            isPaired() -> heartbeatHandler.post(heartbeatTask)
+            isPaired() -> {
+                heartbeatHandler.post(heartbeatTask)
+                heartbeatHandler.post(commandTask)
+            }
             pendingPairingId() != null -> pairingHandler.post(pairingPollTask)
             else -> window.decorView.postDelayed({ sendDiscovery() }, 500)
         }
@@ -186,6 +218,7 @@ class MainActivity : Activity() {
 
     override fun onStop() {
         heartbeatHandler.removeCallbacks(heartbeatTask)
+        heartbeatHandler.removeCallbacks(commandTask)
         pairingHandler.removeCallbacks(pairingPollTask)
         super.onStop()
     }
@@ -212,6 +245,7 @@ class MainActivity : Activity() {
         }
         val offer = pendingOffer ?: return
         pendingOffer = null
+        screenCapturePermission = data
         pendingCapture = offer to data
         startPendingCapture()
     }
@@ -235,8 +269,15 @@ class MainActivity : Activity() {
                             status.text = "Stav: web žádá o sdílení obrazovky..."
                             pendingOffer = SessionDescription(SessionDescription.Type.OFFER, message.getString("sdp"))
                             startScreenCaptureService()
-                            val projection = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-                            startActivityForResult(projection.createScreenCaptureIntent(), SCREEN_CAPTURE_REQUEST)
+                            val permission = screenCapturePermission
+                            if (permission != null) {
+                                pendingCapture = pendingOffer!! to permission
+                                pendingOffer = null
+                                startPendingCapture()
+                            } else {
+                                val projection = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+                                startActivityForResult(projection.createScreenCaptureIntent(), SCREEN_CAPTURE_REQUEST)
+                            }
                         }
                         "candidate" -> {
                             val candidate = message.getJSONObject("candidate")
@@ -251,7 +292,7 @@ class MainActivity : Activity() {
                                 else connection.addIceCandidate(iceCandidate)
                             }
                         }
-                        "hangup" -> runOnUiThread { stopScreenShare() }
+                        "hangup" -> runOnUiThread { stopPeerConnection() }
                     }
                 } catch (error: JSONException) {
                     Log.w("OrbitQuest", "Neplatná WebRTC signalizace.", error)
@@ -332,28 +373,30 @@ class MainActivity : Activity() {
 
     private fun startScreenShareCapture(offer: SessionDescription, permissionData: Intent) {
         val factory = peerFactory ?: return
-        stopScreenShare(stopForegroundService = false)
+        stopPeerConnection()
         remoteDescriptionReady = false
-        eglBase = EglBase.create()
-        videoSource = factory.createVideoSource(false)
-        screenCapturer = ScreenCapturerAndroid(permissionData, object : MediaProjection.Callback() {
-            override fun onStop() {
+        if (screenCapturer == null || videoSource == null || surfaceTextureHelper == null || eglBase == null) {
+            eglBase = EglBase.create()
+            videoSource = factory.createVideoSource(false)
+            screenCapturer = ScreenCapturerAndroid(permissionData, object : MediaProjection.Callback() {
+                override fun onStop() {
+                    stopScreenShare()
+                }
+            })
+            surfaceTextureHelper = SurfaceTextureHelper.create("ScreenCapture", eglBase!!.eglBaseContext)
+            screenCapturer?.initialize(
+                surfaceTextureHelper,
+                this,
+                videoSource!!.capturerObserver
+            )
+            try {
+                screenCapturer?.startCapture(1280, 720, 15)
+            } catch (error: SecurityException) {
                 stopScreenShare()
+                status.text = "Stav: Android nepovolil sdílení obrazovky."
+                Log.e("OrbitQuest", "MediaProjection se nepodařilo spustit.", error)
+                return
             }
-        })
-        surfaceTextureHelper = SurfaceTextureHelper.create("ScreenCapture", eglBase!!.eglBaseContext)
-        screenCapturer?.initialize(
-            surfaceTextureHelper,
-            this,
-            videoSource!!.capturerObserver
-        )
-        try {
-            screenCapturer?.startCapture(1280, 720, 15)
-        } catch (error: SecurityException) {
-            stopScreenShare()
-            status.text = "Stav: Android nepovolil sdílení obrazovky."
-            Log.e("OrbitQuest", "MediaProjection se nepodařilo spustit.", error)
-            return
         }
         val videoTrack = factory.createVideoTrack("screen", videoSource)
         val configuration = PeerConnection.RTCConfiguration(iceServers)
@@ -407,6 +450,13 @@ class MainActivity : Activity() {
         }, offer)
     }
 
+    private fun stopPeerConnection() {
+        peerConnection?.close()
+        peerConnection = null
+        pendingRemoteCandidates.clear()
+        remoteDescriptionReady = false
+    }
+
     private fun stopScreenShare(stopForegroundService: Boolean = true) {
         if (stoppingCapture) return
         stoppingCapture = true
@@ -417,8 +467,7 @@ class MainActivity : Activity() {
             screenCapturer = null
             surfaceTextureHelper?.dispose()
             surfaceTextureHelper = null
-            peerConnection?.close()
-            peerConnection = null
+            stopPeerConnection()
             videoSource?.dispose()
             videoSource = null
             eglBase?.release()
@@ -618,6 +667,7 @@ class MainActivity : Activity() {
             heartbeatInFlight.set(false)
             return
         }
+
         val baseUrl = preferences.getString(PAIRED_BACKEND_URL, null).orEmpty()
         if (baseUrl.isBlank()) {
             heartbeatInFlight.set(false)
@@ -654,6 +704,162 @@ class MainActivity : Activity() {
                 Log.w("OrbitQuest", "URL backendu pro heartbeat není platná.", error)
             } finally {
                 heartbeatInFlight.set(false)
+            }
+        }
+    }
+
+    private fun pollCommands() {
+        if (!isPaired()) return
+        val baseUrl = preferences.getString(PAIRED_BACKEND_URL, null).orEmpty()
+        val deviceId = preferences.getString("paired_device_id", null).orEmpty()
+        if (baseUrl.isBlank() || deviceId.isBlank()) return
+        thread {
+            try {
+                val url = URI("$baseUrl/api/devices/$deviceId/commands?limit=20").toURL()
+                val connection = url.openConnection() as HttpURLConnection
+                connection.requestMethod = "GET"
+                connection.connectTimeout = 5000
+                connection.readTimeout = 5000
+                val responseCode = connection.responseCode
+                if (responseCode !in 200..299) throw IOException("Backend vrátil HTTP $responseCode.")
+                val commands = org.json.JSONArray(connection.inputStream.bufferedReader().use { it.readText() })
+                connection.disconnect()
+                for (index in 0 until commands.length()) {
+                    val command = commands.getJSONObject(index)
+                    if (command.getString("status") == "queued") {
+                        executeCommand(baseUrl, deviceId, command)
+                        break
+                    }
+                }
+            } catch (error: Exception) {
+                Log.w("OrbitQuest", "Načtení příkazů se nepodařilo.", error)
+            }
+        }
+    }
+
+    private fun executeCommand(baseUrl: String, deviceId: String, command: JSONObject) {
+        val commandId = command.getString("id")
+        val type = command.getString("type")
+        when (type) {
+            "restart" -> {
+                if (updateCommandBlocking(baseUrl, deviceId, commandId, "sent", null)) {
+                    getSystemService(DevicePolicyManager::class.java)
+                        .reboot(ComponentName(this, OrbitDeviceAdminReceiver::class.java))
+                }
+            }
+            "lock" -> runOnUiThread {
+                try {
+                    enterKioskMode()
+                    updateCommand(baseUrl, deviceId, commandId, "sent", null)
+                    updateCommand(baseUrl, deviceId, commandId, "completed", null)
+                } catch (error: RuntimeException) {
+                    updateCommand(baseUrl, deviceId, commandId, "failed", error.message ?: "Lock task se nepodařilo spustit.")
+                }
+            }
+            "unlock" -> runOnUiThread {
+                try {
+                    stopLockTask()
+                    setKioskMode(false)
+                    preferences.edit().putBoolean(LOCKED, false).apply()
+                    updateCommand(baseUrl, deviceId, commandId, "completed", null)
+                } catch (error: RuntimeException) {
+                    updateCommand(baseUrl, deviceId, commandId, "failed", error.message ?: "Lock task se nepodařilo ukončit.")
+                }
+            }
+            "shutdown" -> updateCommand(
+                baseUrl,
+                deviceId,
+                commandId,
+                "failed",
+                "Android neposkytuje aplikaci API pro vypnutí zařízení; použijte restart.",
+            )
+            else -> updateCommand(baseUrl, deviceId, commandId, "failed", "Neznámý typ příkazu: $type")
+        }
+    }
+
+    private fun setKioskMode(locked: Boolean) {
+        lockOverlay.visibility = if (locked) View.VISIBLE else View.GONE
+        window.decorView.systemUiVisibility = if (locked) {
+            View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
+                View.SYSTEM_UI_FLAG_FULLSCREEN or
+                View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+                View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
+                View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
+                View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+        } else {
+            View.SYSTEM_UI_FLAG_VISIBLE
+        }
+    }
+
+    private fun enterKioskMode() {
+        getSystemService(DevicePolicyManager::class.java).setLockTaskPackages(
+            ComponentName(this, OrbitDeviceAdminReceiver::class.java),
+            arrayOf(packageName),
+        )
+        startLockTask()
+        preferences.edit().putBoolean(LOCKED, true).apply()
+        setKioskMode(true)
+    }
+
+    private fun updateCommandBlocking(
+        baseUrl: String,
+        deviceId: String,
+        commandId: String,
+        commandStatus: String,
+        errorMessage: String?,
+    ): Boolean {
+        return try {
+            val url = URI("$baseUrl/api/devices/$deviceId/commands/$commandId").toURL()
+            val connection = url.openConnection() as HttpURLConnection
+            connection.requestMethod = "PATCH"
+            connection.connectTimeout = 5000
+            connection.readTimeout = 5000
+            connection.doOutput = true
+            connection.setRequestProperty("Content-Type", "application/json")
+            val payload = JSONObject()
+                .put("status", commandStatus)
+                .put("error_message", errorMessage)
+                .toString()
+            connection.outputStream.use { it.write(payload.toByteArray()) }
+            val responseCode = connection.responseCode
+            connection.disconnect()
+            if (responseCode !in 200..299) {
+                throw IOException("Backend vrátil HTTP $responseCode.")
+            }
+            true
+        } catch (error: Exception) {
+            Log.w("OrbitQuest", "Stav restartovacího příkazu se nepodařilo uložit.", error)
+            false
+        }
+    }
+
+    private fun updateCommand(
+        baseUrl: String,
+        deviceId: String,
+        commandId: String,
+        commandStatus: String,
+        errorMessage: String?,
+    ) {
+        thread {
+            try {
+                val url = URI("$baseUrl/api/devices/$deviceId/commands/$commandId").toURL()
+                val connection = url.openConnection() as HttpURLConnection
+                connection.requestMethod = "PATCH"
+                connection.connectTimeout = 5000
+                connection.readTimeout = 5000
+                connection.doOutput = true
+                connection.setRequestProperty("Content-Type", "application/json")
+                val payload = JSONObject()
+                    .put("status", commandStatus)
+                    .put("error_message", errorMessage)
+                    .toString()
+                connection.outputStream.use { it.write(payload.toByteArray()) }
+                if (connection.responseCode !in 200..299) {
+                    throw IOException("Backend vrátil HTTP ${connection.responseCode}.")
+                }
+                connection.disconnect()
+            } catch (error: Exception) {
+                Log.w("OrbitQuest", "Stav příkazu se nepodařilo aktualizovat.", error)
             }
         }
     }

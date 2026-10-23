@@ -47,6 +47,11 @@ class CommandRead(CommandCreate):
     model_config = ConfigDict(from_attributes=True)
 
 
+class CommandUpdate(BaseModel):
+    status: CommandStatus
+    error_message: str | None = None
+
+
 class EventRead(BaseModel):
     id: str
     device_id: str | None

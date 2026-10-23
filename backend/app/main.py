@@ -12,6 +12,7 @@ from .config import settings
 from .database import Base, engine, get_db
 from .models import AuditEvent, Command, CommandStatus, Device, DeviceStatus, EventType, PairingRequest, PairingStatus
 from .schemas import (
+    CommandUpdate,
     CommandCreate, CommandRead, DeviceCreate, DeviceHeartbeat, DeviceRead, EventRead, HealthRead,
     PairingConfirm, PairingDiscovery, PairingRead,
 )
@@ -257,6 +258,31 @@ def create_command(device_id: str, data: CommandCreate, db: Session = Depends(ge
     command = Command(device_id=device_id, **data.model_dump())
     db.add(command)
     db.add(AuditEvent(device=device, type=EventType.command_created, message=f"Naplánován příkaz: {data.type.value}."))
+    db.commit()
+    db.refresh(command)
+    return command
+
+
+@app.patch("/api/devices/{device_id}/commands/{command_id}", response_model=CommandRead, tags=["commands"])
+def update_command(
+    device_id: str,
+    command_id: str,
+    data: CommandUpdate,
+    db: Session = Depends(get_db),
+) -> Command:
+    command = db.scalar(select(Command).where(Command.id == command_id, Command.device_id == device_id))
+    if command is None:
+        raise HTTPException(status_code=404, detail="Příkaz nebyl nalezen.")
+    command.status = data.status
+    command.error_message = data.error_message
+    if data.status in (CommandStatus.completed, CommandStatus.failed):
+        command.completed_at = utc_now()
+        db.add(AuditEvent(
+            device=command.device,
+            type=EventType.command_completed,
+            message=f"Příkaz {command.type.value} byl dokončen se stavem {data.status.value}.",
+            metadata_json={"command_id": command.id, "error_message": data.error_message},
+        ))
     db.commit()
     db.refresh(command)
     return command
