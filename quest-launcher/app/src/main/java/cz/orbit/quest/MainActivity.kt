@@ -50,8 +50,6 @@ import org.webrtc.SurfaceTextureHelper
 
 class MainActivity : Activity() {
     private companion object {
-        const val HEARTBEAT_INTERVAL_MS = 10_000L
-        const val COMMAND_POLL_INTERVAL_MS = 5_000L
         const val PAIRING_POLL_INTERVAL_MS = 3_000L
         const val PREFS = "orbit_quest"
         const val PAIRED_BACKEND_URL = "paired_backend_url"
@@ -75,22 +73,8 @@ class MainActivity : Activity() {
     private lateinit var pairingPinLabel: TextView
     private lateinit var pairingPinText: TextView
     private lateinit var lockOverlay: TextView
-    private val heartbeatHandler = Handler(Looper.getMainLooper())
     private val pairingHandler = Handler(Looper.getMainLooper())
-    private val heartbeatInFlight = AtomicBoolean(false)
     private val pairingPollInFlight = AtomicBoolean(false)
-    private val heartbeatTask = object : Runnable {
-        override fun run() {
-            sendHeartbeat()
-            heartbeatHandler.postDelayed(this, HEARTBEAT_INTERVAL_MS)
-        }
-    }
-    private val commandTask = object : Runnable {
-        override fun run() {
-            pollCommands()
-            heartbeatHandler.postDelayed(this, COMMAND_POLL_INTERVAL_MS)
-        }
-    }
     private val serialNumber by lazy {
         Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID) ?: UUID.randomUUID().toString()
     }
@@ -110,6 +94,7 @@ class MainActivity : Activity() {
     private var stoppingCapture = false
     private var screenCaptureServiceReady = false
     private var peerFactory: PeerConnectionFactory? = null
+    private var screenCapturePromptInFlight = false
     private var iceServers = listOf(
         PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer()
     )
@@ -139,7 +124,7 @@ class MainActivity : Activity() {
 
         root.addView(label("ORBIT QUEST / PROTOTYP"))
         root.addView(title("Párování headsetu"))
-        root.addView(description("Nechte tuto aplikaci otevřenou a potvrďte zařízení ve webové administraci."))
+        root.addView(description("Tato obrazovka slouží ke konfiguraci a prvnímu oprávnění sdílení obrazovky."))
 
         backendUrl = input("URL backendu", "http://192.168.1.100:8000")
         deviceName = input("Název headsetu", "Quest")
@@ -207,18 +192,16 @@ class MainActivity : Activity() {
         super.onStart()
         when {
             isPaired() -> {
-                heartbeatHandler.post(heartbeatTask)
-                heartbeatHandler.post(commandTask)
+                startAgentService()
+                requestScreenCapturePermissionIfNeeded()
             }
             pendingPairingId() != null -> pairingHandler.post(pairingPollTask)
             else -> window.decorView.postDelayed({ sendDiscovery() }, 500)
         }
-        if (isPaired()) loadIceServersAndConnect()
+        if (isPaired() && !ScreenCaptureForegroundService.signalingReady) loadIceServersAndConnect()
     }
 
     override fun onStop() {
-        heartbeatHandler.removeCallbacks(heartbeatTask)
-        heartbeatHandler.removeCallbacks(commandTask)
         pairingHandler.removeCallbacks(pairingPollTask)
         super.onStop()
     }
@@ -226,7 +209,6 @@ class MainActivity : Activity() {
     override fun onDestroy() {
         signalingSocket?.close(1000, "Activity destroyed")
         signalingSocket = null
-        stopScreenShare()
         peerFactory?.dispose()
         peerFactory = null
         super.onDestroy()
@@ -235,6 +217,7 @@ class MainActivity : Activity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode != SCREEN_CAPTURE_REQUEST || resultCode != RESULT_OK || data == null) {
+            screenCapturePromptInFlight = false
             pendingOffer = null
             pendingCapture = null
             pendingRemoteCandidates.clear()
@@ -243,11 +226,12 @@ class MainActivity : Activity() {
             screenCaptureServiceReady = false
             return
         }
-        val offer = pendingOffer ?: return
+        screenCapturePromptInFlight = false
+        val offer = pendingOffer
         pendingOffer = null
         screenCapturePermission = data
-        pendingCapture = offer to data
-        startPendingCapture()
+        startBackgroundScreenCaptureService(data, offer, pendingRemoteCandidates)
+        finishAndRemoveTask()
     }
 
     private fun connectSignaling() {
@@ -268,14 +252,9 @@ class MainActivity : Activity() {
                         "offer" -> runOnUiThread {
                             status.text = "Stav: web žádá o sdílení obrazovky..."
                             pendingOffer = SessionDescription(SessionDescription.Type.OFFER, message.getString("sdp"))
-                            startScreenCaptureService()
-                            val permission = screenCapturePermission
-                            if (permission != null) {
-                                pendingCapture = pendingOffer!! to permission
-                                pendingOffer = null
-                                startPendingCapture()
-                            } else {
+                            if (!screenCapturePromptInFlight) {
                                 val projection = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+                                screenCapturePromptInFlight = true
                                 startActivityForResult(projection.createScreenCaptureIntent(), SCREEN_CAPTURE_REQUEST)
                             }
                         }
@@ -604,7 +583,8 @@ class MainActivity : Activity() {
             pairingHandler.removeCallbacks(pairingPollTask)
             status.text = "Stav: headset je spárovaný a připojený."
             updatePairingControls()
-            heartbeatHandler.post(heartbeatTask)
+            startAgentService()
+            requestScreenCapturePermissionIfNeeded()
             loadIceServersAndConnect()
         }
     }
@@ -622,7 +602,7 @@ class MainActivity : Activity() {
     }
 
     private fun resetPairing() {
-        heartbeatHandler.removeCallbacks(heartbeatTask)
+        stopService(Intent(this, OrbitAgentService::class.java))
         pairingHandler.removeCallbacks(pairingPollTask)
         signalingSocket?.close(1000, "Pairing reset")
         signalingSocket = null
@@ -647,6 +627,22 @@ class MainActivity : Activity() {
 
     private fun isPaired() = !preferences.getString(PAIRED_BACKEND_URL, null).isNullOrBlank()
 
+    private fun startAgentService() {
+        val serviceIntent = Intent(this, OrbitAgentService::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(serviceIntent)
+        } else {
+            startService(serviceIntent)
+        }
+    }
+
+    private fun requestScreenCapturePermissionIfNeeded() {
+        if (!isPaired() || screenCapturePermission != null || screenCapturePromptInFlight) return
+        screenCapturePromptInFlight = true
+        val projection = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+        startActivityForResult(projection.createScreenCaptureIntent(), SCREEN_CAPTURE_REQUEST)
+    }
+
     private fun updatePairingControls() {
         if (!::pairButton.isInitialized) return
         val paired = isPaired()
@@ -659,122 +655,6 @@ class MainActivity : Activity() {
         pairingPinText.visibility = if (paired) View.GONE else View.VISIBLE
         backendUrl.visibility = if (paired) View.GONE else View.VISIBLE
         deviceName.visibility = if (paired) View.GONE else View.VISIBLE
-    }
-
-    private fun sendHeartbeat() {
-        if (!heartbeatInFlight.compareAndSet(false, true)) return
-        if (!isPaired()) {
-            heartbeatInFlight.set(false)
-            return
-        }
-
-        val baseUrl = preferences.getString(PAIRED_BACKEND_URL, null).orEmpty()
-        if (baseUrl.isBlank()) {
-            heartbeatInFlight.set(false)
-            return
-        }
-        thread {
-            try {
-                val url = URI("$baseUrl/api/devices/heartbeat").toURL()
-                val connection = url.openConnection() as HttpURLConnection
-                connection.requestMethod = "POST"
-                connection.connectTimeout = 5000
-                connection.readTimeout = 5000
-                connection.doOutput = true
-                connection.setRequestProperty("Content-Type", "application/json")
-                val payload = """{"serial_number":${json(serialNumber)},"current_app":"Orbit Quest"}"""
-                connection.outputStream.use { it.write(payload.toByteArray()) }
-                val responseCode = connection.responseCode
-                if (responseCode !in 200..299) {
-                    throw IOException("Backend vrátil HTTP $responseCode.")
-                }
-                connection.disconnect()
-                runOnUiThread {
-                    status.text = "Stav: headset je spárovaný a připojený k serveru."
-                }
-            } catch (error: IOException) {
-                runOnUiThread {
-                    status.text = "Stav: headset je spárovaný, server není dostupný."
-                }
-                Log.w("OrbitQuest", "Heartbeat se nepodařilo odeslat.", error)
-            } catch (error: IllegalArgumentException) {
-                runOnUiThread {
-                    status.text = "Stav: headset je spárovaný, URL serveru není platná."
-                }
-                Log.w("OrbitQuest", "URL backendu pro heartbeat není platná.", error)
-            } finally {
-                heartbeatInFlight.set(false)
-            }
-        }
-    }
-
-    private fun pollCommands() {
-        if (!isPaired()) return
-        val baseUrl = preferences.getString(PAIRED_BACKEND_URL, null).orEmpty()
-        val deviceId = preferences.getString("paired_device_id", null).orEmpty()
-        if (baseUrl.isBlank() || deviceId.isBlank()) return
-        thread {
-            try {
-                val url = URI("$baseUrl/api/devices/$deviceId/commands?limit=20").toURL()
-                val connection = url.openConnection() as HttpURLConnection
-                connection.requestMethod = "GET"
-                connection.connectTimeout = 5000
-                connection.readTimeout = 5000
-                val responseCode = connection.responseCode
-                if (responseCode !in 200..299) throw IOException("Backend vrátil HTTP $responseCode.")
-                val commands = org.json.JSONArray(connection.inputStream.bufferedReader().use { it.readText() })
-                connection.disconnect()
-                for (index in 0 until commands.length()) {
-                    val command = commands.getJSONObject(index)
-                    if (command.getString("status") == "queued") {
-                        executeCommand(baseUrl, deviceId, command)
-                        break
-                    }
-                }
-            } catch (error: Exception) {
-                Log.w("OrbitQuest", "Načtení příkazů se nepodařilo.", error)
-            }
-        }
-    }
-
-    private fun executeCommand(baseUrl: String, deviceId: String, command: JSONObject) {
-        val commandId = command.getString("id")
-        val type = command.getString("type")
-        when (type) {
-            "restart" -> {
-                if (updateCommandBlocking(baseUrl, deviceId, commandId, "sent", null)) {
-                    getSystemService(DevicePolicyManager::class.java)
-                        .reboot(ComponentName(this, OrbitDeviceAdminReceiver::class.java))
-                }
-            }
-            "lock" -> runOnUiThread {
-                try {
-                    enterKioskMode()
-                    updateCommand(baseUrl, deviceId, commandId, "sent", null)
-                    updateCommand(baseUrl, deviceId, commandId, "completed", null)
-                } catch (error: RuntimeException) {
-                    updateCommand(baseUrl, deviceId, commandId, "failed", error.message ?: "Lock task se nepodařilo spustit.")
-                }
-            }
-            "unlock" -> runOnUiThread {
-                try {
-                    stopLockTask()
-                    setKioskMode(false)
-                    preferences.edit().putBoolean(LOCKED, false).apply()
-                    updateCommand(baseUrl, deviceId, commandId, "completed", null)
-                } catch (error: RuntimeException) {
-                    updateCommand(baseUrl, deviceId, commandId, "failed", error.message ?: "Lock task se nepodařilo ukončit.")
-                }
-            }
-            "shutdown" -> updateCommand(
-                baseUrl,
-                deviceId,
-                commandId,
-                "failed",
-                "Android neposkytuje aplikaci API pro vypnutí zařízení; použijte restart.",
-            )
-            else -> updateCommand(baseUrl, deviceId, commandId, "failed", "Neznámý typ příkazu: $type")
-        }
     }
 
     private fun setKioskMode(locked: Boolean) {
@@ -799,69 +679,6 @@ class MainActivity : Activity() {
         startLockTask()
         preferences.edit().putBoolean(LOCKED, true).apply()
         setKioskMode(true)
-    }
-
-    private fun updateCommandBlocking(
-        baseUrl: String,
-        deviceId: String,
-        commandId: String,
-        commandStatus: String,
-        errorMessage: String?,
-    ): Boolean {
-        return try {
-            val url = URI("$baseUrl/api/devices/$deviceId/commands/$commandId").toURL()
-            val connection = url.openConnection() as HttpURLConnection
-            connection.requestMethod = "PATCH"
-            connection.connectTimeout = 5000
-            connection.readTimeout = 5000
-            connection.doOutput = true
-            connection.setRequestProperty("Content-Type", "application/json")
-            val payload = JSONObject()
-                .put("status", commandStatus)
-                .put("error_message", errorMessage)
-                .toString()
-            connection.outputStream.use { it.write(payload.toByteArray()) }
-            val responseCode = connection.responseCode
-            connection.disconnect()
-            if (responseCode !in 200..299) {
-                throw IOException("Backend vrátil HTTP $responseCode.")
-            }
-            true
-        } catch (error: Exception) {
-            Log.w("OrbitQuest", "Stav restartovacího příkazu se nepodařilo uložit.", error)
-            false
-        }
-    }
-
-    private fun updateCommand(
-        baseUrl: String,
-        deviceId: String,
-        commandId: String,
-        commandStatus: String,
-        errorMessage: String?,
-    ) {
-        thread {
-            try {
-                val url = URI("$baseUrl/api/devices/$deviceId/commands/$commandId").toURL()
-                val connection = url.openConnection() as HttpURLConnection
-                connection.requestMethod = "PATCH"
-                connection.connectTimeout = 5000
-                connection.readTimeout = 5000
-                connection.doOutput = true
-                connection.setRequestProperty("Content-Type", "application/json")
-                val payload = JSONObject()
-                    .put("status", commandStatus)
-                    .put("error_message", errorMessage)
-                    .toString()
-                connection.outputStream.use { it.write(payload.toByteArray()) }
-                if (connection.responseCode !in 200..299) {
-                    throw IOException("Backend vrátil HTTP ${connection.responseCode}.")
-                }
-                connection.disconnect()
-            } catch (error: Exception) {
-                Log.w("OrbitQuest", "Stav příkazu se nepodařilo aktualizovat.", error)
-            }
-        }
     }
 
     private fun json(value: String) = JSONObject.quote(value)
@@ -902,5 +719,30 @@ class MainActivity : Activity() {
         textSize = 16f
         setSingleLine(true)
         setPadding(0, 20, 0, 8)
+    }
+
+    private fun startBackgroundScreenCaptureService(
+        permissionData: Intent,
+        offer: SessionDescription?,
+        remoteCandidates: List<org.webrtc.IceCandidate>,
+    ) {
+        val candidates = org.json.JSONArray().apply {
+            remoteCandidates.forEach { candidate ->
+                put(JSONObject()
+                    .put("sdpMid", candidate.sdpMid)
+                    .put("sdpMLineIndex", candidate.sdpMLineIndex)
+                    .put("candidate", candidate.sdp))
+            }
+        }
+        val serviceIntent = Intent(this, ScreenCaptureForegroundService::class.java)
+            .putExtra(ScreenCaptureForegroundService.EXTRA_PERMISSION_DATA, permissionData)
+            .putExtra(ScreenCaptureForegroundService.EXTRA_REMOTE_CANDIDATES, candidates.toString())
+        if (offer != null) serviceIntent.putExtra(ScreenCaptureForegroundService.EXTRA_OFFER_SDP, offer.description)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(serviceIntent)
+            else startService(serviceIntent)
+        } catch (error: SecurityException) {
+            Log.e("OrbitQuest", "Background WebRTC službu se nepodařilo spustit.", error)
+        }
     }
 }

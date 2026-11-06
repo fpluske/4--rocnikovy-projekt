@@ -1,5 +1,31 @@
 # Orbit Quest pairing app
 
+## Aplikace Agent a Setup
+
+Projekt nyní vytváří dvě APK:
+
+- `app` / `cz.orbit.quest` – Orbit Agent. Je device owner, obsahuje heartbeat,
+  vykonávání příkazů, boot receiver a WebRTC foreground service. Nemá launcher
+  obrazovku pro běžné používání.
+- `setup` / `cz.orbit.setup` – Orbit Setup. Je běžné konfigurační GUI, které
+  předává URL backendu a název headsetu agentovi přes chráněný broadcast.
+
+Agentova Activity se otevře pouze při prvním párování nebo při systémovém
+potvrzení sdílení obrazovky. Po spárování a při startu headsetu se Agent pokusí
+dialog pro sdílení obrazovky otevřít automaticky. Android ale stále vyžaduje
+potvrzení uživatelem; po potvrzení převezme sdílení foreground service. Po
+dokončení konfigurace může být Setup ukončen, agentové služby na něm nejsou
+závislé.
+
+Sestavení obou APK:
+
+```bash
+./gradlew :app:assembleDebug :setup:assembleDebug
+```
+
+Výsledné soubory jsou v `app/build/outputs/apk/debug/` a
+`setup/build/outputs/apk/debug/`.
+
 Minimální Android aplikace pro první spárování headsetu s Orbit backendem.
 
 Aplikace obsahuje `DeviceAdminReceiver`, takže ji lze při provisioningu nastavit

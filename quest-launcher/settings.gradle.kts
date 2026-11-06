@@ -16,3 +16,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "OrbitQuest"
 include(":app")
+include(":setup")
