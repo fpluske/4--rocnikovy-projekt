@@ -4,20 +4,34 @@ import hashlib
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
 from fastapi import WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import select, text
+from sqlalchemy import desc, inspect, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .config import settings
 from .database import Base, engine, get_db
-from .models import AuditEvent, Command, CommandStatus, Device, DeviceStatus, EventType, PairingRequest, PairingStatus
+from .models import AuditEvent, Command, CommandStatus, Device, DeviceStatus, EventType, PairingRequest, PairingStatus, UpdatePackage
 from .schemas import (
     CommandUpdate,
     CommandCreate, CommandRead, DeviceCreate, DeviceHeartbeat, DeviceRead, EventRead, HealthRead,
-    PairingConfirm, PairingDiscovery, PairingRead,
+    PairingConfirm, PairingDiscovery, PairingRead, UpdatePackageRead,
 )
 
 Base.metadata.create_all(bind=engine)
+
+
+def ensure_device_status_columns() -> None:
+    columns = {column["name"] for column in inspect(engine).get_columns("devices")}
+    with engine.begin() as connection:
+        if "horizon_os_version" not in columns:
+            connection.execute(text("ALTER TABLE devices ADD COLUMN horizon_os_version VARCHAR(120)"))
+        if "horizon_os_update_pending" not in columns:
+            connection.execute(text(
+                "ALTER TABLE devices ADD COLUMN horizon_os_update_pending BOOLEAN NOT NULL DEFAULT FALSE"
+            ))
+
+
+ensure_device_status_columns()
 
 DEVICE_OFFLINE_AFTER = timedelta(seconds=30)
 
@@ -81,6 +95,11 @@ def list_devices(db: Session = Depends(get_db)) -> list[Device]:
     if changed:
         db.commit()
     return devices
+
+
+@app.get("/api/updates/latest", response_model=UpdatePackageRead | None, tags=["updates"])
+def latest_update(db: Session = Depends(get_db)):
+    return db.scalar(select(UpdatePackage).order_by(desc(UpdatePackage.created_at)).limit(1))
 
 
 def pin_digest(nonce: str, pin: str) -> str:
@@ -217,10 +236,12 @@ def heartbeat(
     device = db.scalar(select(Device).where(Device.serial_number == data.serial_number))
     if device is None:
         raise HTTPException(status_code=404, detail="Zařízení nebylo nalezeno.")
-    device.status = DeviceStatus.online
+    device.status = data.status
     device.last_seen_at = utc_now()
     device.battery_percent = data.battery_percent
     device.firmware_version = data.firmware_version
+    device.horizon_os_version = data.horizon_os_version
+    device.horizon_os_update_pending = data.horizon_os_update_pending
     device.current_app = data.current_app
     if request.client is not None:
         device.ip_address = request.client.host

@@ -16,6 +16,7 @@
         android:usesCleartextTraffic="true">
         <activity
             android:name=".MainActivity"
+            android:launchMode="singleTop"
             android:exported="true" />
         <service
             android:name=".ScreenCaptureForegroundService"

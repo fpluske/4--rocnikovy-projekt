@@ -43,17 +43,11 @@ class CommandExecutionService : Service() {
                 "restart" -> getSystemService(DevicePolicyManager::class.java).reboot(
                     ComponentName(this, OrbitDeviceAdminReceiver::class.java),
                 )
-                "lock" -> {
-                    getSystemService(DevicePolicyManager::class.java).lockNow()
-                    updateCommand(baseUrl, deviceId, commandId, "completed", null)
-                }
-                "unlock" -> updateCommand(
-                    baseUrl, deviceId, commandId, "failed",
-                    "Odemknutí lock task režimu vyžaduje aktivní obrazovku aplikace.",
-                )
+                "lock" -> dispatchKioskCommand(MainActivity.ACTION_LOCK, baseUrl, deviceId, commandId)
+                "unlock" -> dispatchKioskCommand(MainActivity.ACTION_UNLOCK, baseUrl, deviceId, commandId)
                 "shutdown" -> updateCommand(
                     baseUrl, deviceId, commandId, "failed",
-                    "Android neposkytuje aplikaci API pro vypnutí zařízení; použijte restart.",
+                    "Android neposkytuje aplikaci API pro vypnutí zařízení; použijte uzamčení.",
                 )
                 else -> updateCommand(baseUrl, deviceId, commandId, "failed", "Neznámý typ příkazu.")
             }
@@ -61,6 +55,14 @@ class CommandExecutionService : Service() {
             Log.w("OrbitQuest", "Příkaz se nepodařilo vykonat.", error)
             updateCommand(baseUrl, deviceId, commandId, "failed", error.message ?: "Neznámá chyba.")
         }
+    }
+
+    private fun dispatchKioskCommand(action: String, baseUrl: String, deviceId: String, commandId: String) {
+        startActivity(Intent(this, MainActivity::class.java).apply {
+            this.action = action
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        })
+        updateCommand(baseUrl, deviceId, commandId, "completed", null)
     }
 
     private fun updateCommand(

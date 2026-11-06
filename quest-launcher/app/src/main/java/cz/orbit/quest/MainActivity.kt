@@ -49,7 +49,9 @@ import org.webrtc.VideoTrack
 import org.webrtc.SurfaceTextureHelper
 
 class MainActivity : Activity() {
-    private companion object {
+    companion object {
+        const val ACTION_LOCK = "cz.orbit.quest.action.LOCK"
+        const val ACTION_UNLOCK = "cz.orbit.quest.action.UNLOCK"
         const val PAIRING_POLL_INTERVAL_MS = 3_000L
         const val PREFS = "orbit_quest"
         const val PAIRED_BACKEND_URL = "paired_backend_url"
@@ -186,6 +188,13 @@ class MainActivity : Activity() {
         if (preferences.getBoolean(LOCKED, false)) {
             window.decorView.post { enterKioskMode() }
         }
+        handleCommandIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleCommandIntent(intent)
     }
 
     override fun onStart() {
@@ -671,6 +680,13 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun handleCommandIntent(intent: Intent?) {
+        when (intent?.action) {
+            ACTION_LOCK -> window.decorView.post { enterKioskMode() }
+            ACTION_UNLOCK -> window.decorView.post { exitKioskMode() }
+        }
+    }
+
     private fun enterKioskMode() {
         getSystemService(DevicePolicyManager::class.java).setLockTaskPackages(
             ComponentName(this, OrbitDeviceAdminReceiver::class.java),
@@ -679,6 +695,12 @@ class MainActivity : Activity() {
         startLockTask()
         preferences.edit().putBoolean(LOCKED, true).apply()
         setKioskMode(true)
+    }
+
+    private fun exitKioskMode() {
+        stopLockTask()
+        preferences.edit().putBoolean(LOCKED, false).apply()
+        setKioskMode(false)
     }
 
     private fun json(value: String) = JSONObject.quote(value)

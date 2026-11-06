@@ -48,6 +48,12 @@ migracemi.
 - **`pairing_requests`** – krátkodobé discovery žádosti s nonce, hashí PINu,
   expirací a stavem (`pending`, `confirmed`, `expired`, `rejected`).
 
+Příkazy **Uzamknout** a **Odemknout** používají Android Lock Task (kiosk) režim.
+V tomto režimu uživatel nemůže opustit agentovou aplikaci ani spouštět jiné
+aplikace; odemknutí probíhá pouze příkazem z webové administrace. Pro jeho
+funkčnost musí být agent při nasazení provisionován jako Device Owner. Příkaz
+**Vypnout** není na běžném Androidu dostupný přes veřejné API.
+
 Vztahy:
 
 ```text
@@ -62,6 +68,7 @@ nebo později přes autentizovaný Quest agent.
 
 - `GET /api/health`
 - `GET /api/devices`
+- `GET /api/updates/latest`
 - `POST /api/devices`
 - `POST /api/devices/heartbeat`
 - `DELETE /api/devices/{device_id}`
@@ -87,6 +94,13 @@ agent posílá heartbeat každých deset sekund a přímo v aplikaci zobrazuje, 
 server odpověděl. Zařízení je po úspěšném heartbeatu
 označeno jako `online`; pokud backend neobdrží heartbeat déle než třicet sekund,
 dashboard jej při dalším načtení označí jako `offline`.
+Dashboard zobrazuje aktuální verzi Horizon OS a stav čekající systémové
+aktualizace nahlášené Device Owner agentem. Zobrazuje také verzi Orbit Agenta a porovnává ji
+s nejnovějším záznamem v tabulce `update_packages`. Pokud je novější balíček
+dostupný, zobrazí jeho verzi.
+Při zhasnutí displeje nebo přechodu headsetu do standby agent posílá stav
+`standby`, který dashboard zobrazí jako „režim spánku“. Po probuzení se stav
+vrátí na `online`.
 
 ## Párovací flow
 

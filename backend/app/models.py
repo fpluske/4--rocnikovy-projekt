@@ -2,7 +2,7 @@ from datetime import datetime
 from enum import StrEnum
 from uuid import uuid4
 
-from sqlalchemy import DateTime, ForeignKey, Integer, JSON, String, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, JSON, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .database import Base
@@ -11,6 +11,7 @@ from .database import Base
 class DeviceStatus(StrEnum):
     unknown = "unknown"
     online = "online"
+    standby = "standby"
     offline = "offline"
 
 
@@ -58,6 +59,8 @@ class Device(Base):
     status: Mapped[DeviceStatus] = mapped_column(String(20), nullable=False, default=DeviceStatus.unknown)
     battery_percent: Mapped[int | None] = mapped_column(Integer)
     firmware_version: Mapped[str | None] = mapped_column(String(80))
+    horizon_os_version: Mapped[str | None] = mapped_column(String(120))
+    horizon_os_update_pending: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     ip_address: Mapped[str | None] = mapped_column(String(45))
     current_app: Mapped[str | None] = mapped_column(String(200))
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

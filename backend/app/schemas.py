@@ -17,6 +17,8 @@ class DeviceRead(DeviceCreate):
     status: DeviceStatus
     battery_percent: int | None
     firmware_version: str | None
+    horizon_os_version: str | None
+    horizon_os_update_pending: bool
     ip_address: str | None
     current_app: str | None
     last_seen_at: datetime | None
@@ -27,9 +29,21 @@ class DeviceRead(DeviceCreate):
 
 class DeviceHeartbeat(BaseModel):
     serial_number: str = Field(min_length=1, max_length=120)
+    status: DeviceStatus = DeviceStatus.online
     battery_percent: int | None = Field(default=None, ge=0, le=100)
     firmware_version: str | None = Field(default=None, max_length=80)
+    horizon_os_version: str | None = Field(default=None, max_length=120)
+    horizon_os_update_pending: bool = False
     current_app: str | None = Field(default=None, max_length=200)
+
+
+class UpdatePackageRead(BaseModel):
+    id: str
+    version: str
+    download_url: str | None
+    checksum: str | None
+    created_at: datetime
+    model_config = ConfigDict(from_attributes=True)
 
 
 class CommandCreate(BaseModel):

@@ -85,6 +85,8 @@ Po potvrzení párování si aplikace uloží URL backendu do lokálního úlož
 Při dalších spuštěních ji použije automaticky a nové párování nevyžaduje.
 Stav připojení se ověřuje heartbeat zprávou každých deset sekund a zobrazuje se
 přímo v aplikaci jako připojený nebo odpojený server.
+Při zhasnutí displeje agent hlásí backendu stav `standby`; po probuzení jej
+změní zpět na `online`.
 
 Po spárování aplikace skryje ovládání nového párování a zobrazí tlačítko
 **Reset**. Jeho použitím se uložené spojení smaže, vygeneruje se nové párování

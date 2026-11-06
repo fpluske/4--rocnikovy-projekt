@@ -49,8 +49,11 @@ button:hover { filter: brightness(.96); }
 .status { padding: 4px 8px; border-radius: 20px; font-size: .75rem; font-weight: 800; text-transform: uppercase; }
 .status.unknown { color: #6b5b20; background: #fff2bd; }
 .status.online { color: #176b4a; background: #d9f5e7; }
+.status.standby { color: #66551a; background: #fff2bd; }
 .status.offline { color: #8a3434; background: #fbe1e1; }
 .last-seen { margin-top: 8px; color: #8b969f; font-size: .78rem !important; }
+.firmware-version { margin-top: 8px; color: var(--muted); font-size: .82rem !important; }
+.firmware-version strong { color: #9a6b00; }
 .actions { flex-wrap: nowrap; justify-content: flex-end; gap: 7px; }
 .actions button { flex: 0 0 auto; white-space: nowrap; }
 .server-connection { display: inline-flex; align-items: center; gap: 7px; padding: 8px 10px; border-radius: 20px; font-size: .8rem; font-weight: 800; white-space: nowrap; }

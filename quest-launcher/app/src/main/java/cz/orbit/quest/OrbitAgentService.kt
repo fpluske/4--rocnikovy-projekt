@@ -4,11 +4,17 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
+import android.app.admin.DevicePolicyManager
+import android.content.ComponentName
 import android.content.Intent
+import android.content.IntentFilter
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.PowerManager
 import android.provider.Settings
 import android.util.Log
 import java.io.IOException
@@ -18,6 +24,7 @@ import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.concurrent.atomic.AtomicReference
 
 class OrbitAgentService : Service() {
     companion object {
@@ -33,9 +40,24 @@ class OrbitAgentService : Service() {
     private val handler = Handler(Looper.getMainLooper())
     private val heartbeatInFlight = AtomicBoolean(false)
     private val commandPollInFlight = AtomicBoolean(false)
+    private val deviceStatus = AtomicReference("online")
+    private val screenStateReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            val status = when (intent.action) {
+                Intent.ACTION_SCREEN_OFF -> "standby"
+                Intent.ACTION_SCREEN_ON -> "online"
+                else -> return
+            }
+            if (deviceStatus.getAndSet(status) != status) sendHeartbeat()
+        }
+    }
     private val serialNumber by lazy {
         Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID) ?: UUID.randomUUID().toString()
     }
+    private val appVersion by lazy {
+        packageManager.getPackageInfo(packageName, 0).versionName ?: "unknown"
+    }
+    private val devicePolicyManager by lazy { getSystemService(DevicePolicyManager::class.java) }
     private val heartbeatTask = object : Runnable {
         override fun run() {
             sendHeartbeat()
@@ -53,6 +75,11 @@ class OrbitAgentService : Service() {
         super.onCreate()
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, notification())
+        deviceStatus.set(if (getSystemService(PowerManager::class.java).isInteractive) "online" else "standby")
+        registerReceiver(screenStateReceiver, IntentFilter().apply {
+            addAction(Intent.ACTION_SCREEN_OFF)
+            addAction(Intent.ACTION_SCREEN_ON)
+        })
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -66,6 +93,7 @@ class OrbitAgentService : Service() {
     override fun onDestroy() {
         handler.removeCallbacks(heartbeatTask)
         handler.removeCallbacks(commandTask)
+        unregisterReceiver(screenStateReceiver)
         super.onDestroy()
     }
 
@@ -89,7 +117,20 @@ class OrbitAgentService : Service() {
                     setRequestProperty("Content-Type", "application/json")
                 }
                 connection.outputStream.use {
-                    it.write("{\"serial_number\":${JSONObject.quote(serialNumber)},\"current_app\":\"Orbit Quest\"}".toByteArray())
+                    it.write(JSONObject()
+                        .put("serial_number", serialNumber)
+                        .put("status", deviceStatus.get())
+                        .put("firmware_version", appVersion)
+                        .put("horizon_os_version", "${android.os.Build.DISPLAY} (${android.os.Build.VERSION.INCREMENTAL})")
+                        .put(
+                            "horizon_os_update_pending",
+                            devicePolicyManager.getPendingSystemUpdate(
+                                ComponentName(this@OrbitAgentService, OrbitDeviceAdminReceiver::class.java),
+                            ) != null,
+                        )
+                        .put("current_app", "Orbit Quest")
+                        .toString()
+                        .toByteArray())
                 }
                 if (connection.responseCode !in 200..299) throw IOException("HTTP ${connection.responseCode}")
                 connection.disconnect()
