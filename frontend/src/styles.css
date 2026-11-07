@@ -18,7 +18,7 @@ h3 { margin-bottom: 6px; }
 .pairing-form-card h2 { margin-bottom: 0; }
 .form-actions { justify-content: flex-end; margin-top: 8px; }
 label { display: grid; gap: 6px; font-size: .9rem; font-weight: 650; }
-input { width: 100%; padding: 11px 12px; color: var(--text); background: var(--card); border: 1px solid var(--input-border); border-radius: 8px; font: inherit; }
+input, select { width: 100%; padding: 11px 12px; color: var(--text); background: var(--card); border: 1px solid var(--input-border); border-radius: 8px; font: inherit; }
 button { padding: 9px 13px; color: var(--text); background: var(--button); border: 0; border-radius: 8px; cursor: pointer; font-weight: 700; }
 button:hover { filter: brightness(.96); }
 .primary { margin-top: 8px; color: white; background: #218c83; }
@@ -28,6 +28,20 @@ button:hover { filter: brightness(.96); }
 .danger { color: #a43b3b; background: #fbe9e9; }
 .secondary { background: var(--card); border: 1px solid var(--input-border); }
 .notice { margin-top: 24px; padding: 13px 16px; color: #21635e; background: #e3f4f1; border-radius: 8px; }
+.error-notice { color: #8a3434; background: #fbe1e1; }
+.auth-page { display: grid; min-height: 100vh; place-items: center; padding: 24px; }
+.auth-card { width: min(460px, 100%); }
+.auth-card h1 { font-size: clamp(2rem, 5vw, 2.8rem); }
+.auth-form, .user-form { display: grid; gap: 14px; }
+.auth-form { margin-top: 24px; }
+.user-form { grid-template-columns: 1fr 1fr .7fr auto; align-items: end; }
+.password-card { margin-top: 24px; }
+.password-form { display: grid; grid-template-columns: 1fr 1fr auto; align-items: end; gap: 14px; }
+.users-card { margin-top: 24px; }
+.user-list { display: grid; gap: 8px; margin-top: 24px; }
+.user-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--divider); }
+.user-row > span:first-child { flex: 1; font-weight: 700; }
+.user-badge { padding: 8px 10px; color: #21635e; background: #e3f4f1; border-radius: 20px; font-size: .8rem; font-weight: 800; white-space: nowrap; }
 .section-heading { margin-bottom: 16px; }
 .section-heading h2 { margin: 0; }
 .section-heading span { color: var(--muted); font-size: .9rem; }
@@ -87,4 +101,7 @@ button:hover { filter: brightness(.96); }
   .actions { width: 100%; justify-content: flex-start; }
   .device-info { width: 100%; }
   .live-actions { flex-wrap: wrap; justify-content: flex-end; }
+  .user-form { grid-template-columns: 1fr; }
+  .password-form { grid-template-columns: 1fr; }
+  .user-row { align-items: flex-start; flex-wrap: wrap; }
 }

@@ -49,6 +49,22 @@ class PairingStatus(StrEnum):
     rejected = "rejected"
 
 
+class UserRole(StrEnum):
+    user = "user"
+    admin = "admin"
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    username: Mapped[str] = mapped_column(String(120), unique=True, index=True, nullable=False)
+    password_hash: Mapped[str] = mapped_column(String(256), nullable=False)
+    role: Mapped[UserRole] = mapped_column(String(20), nullable=False, default=UserRole.user)
+    is_initial_admin: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
 class Device(Base):
     __tablename__ = "devices"
 

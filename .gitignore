@@ -17,9 +17,17 @@ venv/
 
 # Local application data
 backend/data/
+backend/data/**
 *.db
 *.sqlite
 *.sqlite3
+*.db-*
+*.sqlite-*
+*.sqlite3-*
+*.session
+auth-session*
+cookies.txt
+docker-compose.local.yml
 
 # Tooling and operating system files
 .pytest_cache/

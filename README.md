@@ -67,6 +67,11 @@ nebo později přes autentizovaný Quest agent.
 ## API prototypu
 
 - `GET /api/health`
+- `GET /api/auth/status`
+- `POST /api/auth/setup` – pouze do vytvoření prvního admina
+- `POST /api/auth/login`
+- `POST /api/auth/logout`
+- `GET /api/users` / `POST /api/users` / `DELETE /api/users/{user_id}` – admin
 - `GET /api/devices`
 - `GET /api/updates/latest`
 - `POST /api/devices`
@@ -83,8 +88,19 @@ nebo později přes autentizovaný Quest agent.
 - `WS /api/webrtc/{device_id}` – WebRTC signalizační relay pro živý obraz
 - `GET /api/webrtc/config` – ICE/STUN/TURN konfigurace pro WebRTC klienty
 
-Autentizace, skutečné doručování příkazů agentovi a PostgreSQL jsou navazující
-kroky. Připojení k PostgreSQL lze připravit nastavením `DATABASE_URL`;
+Při prvním otevření dashboard vyžádá vytvoření admin účtu (heslo musí mít alespoň
+12 znaků). Po vytvoření je setup endpoint uzavřený a další přístupy vyžadují
+přihlášení. Session je uložená v HttpOnly cookie a backend kontroluje oprávnění
+každého dashboard API požadavku; heartbeat, discovery a WebRTC relay zůstávají
+veřejnými transportními endpointy pro Quest agenta. Admin může přidávat a odebírat headsety a spravovat
+uživatele; role `user` může headsety ovládat, ale nemůže měnit jejich seznam.
+Každý přihlášený uživatel si může změnit vlastní heslo. První vytvořený admin
+účet je chráněný proti odstranění.
+Pro produkci nastavte `AUTH_SECRET` na dlouhou náhodnou hodnotu a při HTTPS
+zapněte `AUTH_COOKIE_SECURE=true`.
+
+Skutečné doručování příkazů agentovi a PostgreSQL jsou navazující kroky.
+Připojení k PostgreSQL lze připravit nastavením `DATABASE_URL`;
 výchozí hodnota je `sqlite:///./data/orbit.db`.
 
 Při prvním spuštění si aplikace zapamatuje URL backendu a ID párovací žádosti.

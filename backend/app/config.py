@@ -5,6 +5,8 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./data/orbit.db"
     cors_origins: str = "http://localhost:5173,http://localhost:8080"
     webrtc_ice_servers: str = '[{"urls":["stun:stun.l.google.com:19302"]}]'
+    auth_secret: str = "change-this-auth-secret-before-production"
+    auth_cookie_secure: bool = False
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

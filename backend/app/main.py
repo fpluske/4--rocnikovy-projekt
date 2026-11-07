@@ -1,7 +1,11 @@
 from datetime import datetime, timedelta, timezone
+import base64
 import hashlib
+import hmac
+import json
+import secrets
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, status
 from fastapi import WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import desc, inspect, select, text
@@ -9,9 +13,13 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .config import settings
-from .database import Base, engine, get_db
-from .models import AuditEvent, Command, CommandStatus, Device, DeviceStatus, EventType, PairingRequest, PairingStatus, UpdatePackage
+from .database import Base, SessionLocal, engine, get_db
+from .models import (
+    AuditEvent, Command, CommandStatus, Device, DeviceStatus, EventType, PairingRequest,
+    PairingStatus, UpdatePackage, User, UserRole,
+)
 from .schemas import (
+    AuthStatus, LoginCreate, PasswordChange, SetupCreate, UserCreate, UserRead,
     CommandUpdate,
     CommandCreate, CommandRead, DeviceCreate, DeviceHeartbeat, DeviceRead, EventRead, HealthRead,
     PairingConfirm, PairingDiscovery, PairingRead, UpdatePackageRead,
@@ -33,18 +41,229 @@ def ensure_device_status_columns() -> None:
 
 ensure_device_status_columns()
 
+
+def ensure_user_columns() -> None:
+    columns = {column["name"] for column in inspect(engine).get_columns("users")}
+    with engine.begin() as connection:
+        if "is_initial_admin" not in columns:
+            connection.execute(text(
+                "ALTER TABLE users ADD COLUMN is_initial_admin BOOLEAN NOT NULL DEFAULT FALSE"
+            ))
+            connection.execute(text(
+                "UPDATE users SET is_initial_admin = TRUE "
+                "WHERE id = (SELECT id FROM users WHERE role = 'admin' ORDER BY created_at, id LIMIT 1)"
+            ))
+
+
+ensure_user_columns()
+
 DEVICE_OFFLINE_AFTER = timedelta(seconds=30)
 
 app = FastAPI(title="Orbit Quest Management API", version="0.1.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origin_list,
-    allow_credentials=False,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 webrtc_connections: dict[str, set[WebSocket]] = {}
+SESSION_COOKIE = "orbit_session"
+SESSION_DURATION = timedelta(hours=8)
+PUBLIC_API_PATHS = {
+    "/api/health", "/api/auth/status", "/api/auth/login", "/api/auth/setup",
+    "/api/devices/heartbeat", "/api/pairing/discover",
+}
+
+
+def _encoded(value: bytes) -> str:
+    return base64.urlsafe_b64encode(value).decode("ascii").rstrip("=")
+
+
+def _decoded(value: str) -> bytes:
+    return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
+
+
+def password_digest(password: str, salt: bytes | None = None) -> str:
+    salt = salt or secrets.token_bytes(16)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, 310_000)
+    return f"pbkdf2_sha256$310000${_encoded(salt)}${_encoded(digest)}"
+
+
+def password_matches(password: str, stored_digest: str) -> bool:
+    try:
+        algorithm, rounds, salt, digest = stored_digest.split("$")
+        if algorithm != "pbkdf2_sha256":
+            return False
+        calculated = hashlib.pbkdf2_hmac(
+            "sha256", password.encode("utf-8"), _decoded(salt), int(rounds)
+        )
+        return hmac.compare_digest(_encoded(calculated), digest)
+    except (ValueError, TypeError):
+        return False
+
+
+def create_session(user: User) -> str:
+    payload = {
+        "user_id": user.id,
+        "role": user.role.value if isinstance(user.role, UserRole) else user.role,
+        "expires_at": int((utc_now() + SESSION_DURATION).timestamp()),
+    }
+    encoded_payload = _encoded(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
+    signature = hmac.new(settings.auth_secret.encode("utf-8"), encoded_payload.encode("ascii"), hashlib.sha256).digest()
+    return f"{encoded_payload}.{_encoded(signature)}"
+
+
+def decode_session(token: str | None) -> dict | None:
+    if not token or "." not in token:
+        return None
+    encoded_payload, encoded_signature = token.split(".", 1)
+    expected = hmac.new(
+        settings.auth_secret.encode("utf-8"), encoded_payload.encode("ascii"), hashlib.sha256
+    ).digest()
+    try:
+        if not hmac.compare_digest(_decoded(encoded_signature), expected):
+            return None
+        payload = json.loads(_decoded(encoded_payload))
+    except (ValueError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    if payload.get("expires_at", 0) < int(utc_now().timestamp()):
+        return None
+    return payload
+
+
+def find_session_user(request: Request, db: Session) -> User | None:
+    session = decode_session(request.cookies.get(SESSION_COOKIE))
+    if session is None:
+        return None
+    return db.get(User, session.get("user_id"))
+
+
+@app.middleware("http")
+async def require_authentication(request: Request, call_next):
+    if request.method == "OPTIONS" or not request.url.path.startswith("/api/") or request.url.path in PUBLIC_API_PATHS:
+        return await call_next(request)
+    with SessionLocal() as db:
+        user = find_session_user(request, db)
+    if user is None:
+        return Response(content='{"detail":"Přihlášení je vyžadováno."}', status_code=401, media_type="application/json")
+    request.state.user = user
+    return await call_next(request)
+
+
+def current_user(request: Request) -> User:
+    user = getattr(request.state, "user", None)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Přihlášení je vyžadováno.")
+    return user
+
+
+def admin_user(request: Request) -> User:
+    user = current_user(request)
+    if user.role != UserRole.admin:
+        raise HTTPException(status_code=403, detail="Tato akce vyžaduje roli admin.")
+    return user
+
+
+def set_session_cookie(response: Response, user: User) -> None:
+    response.set_cookie(
+        SESSION_COOKIE,
+        create_session(user),
+        max_age=int(SESSION_DURATION.total_seconds()),
+        httponly=True,
+        secure=settings.auth_cookie_secure,
+        samesite="lax",
+    )
+
+
+@app.get("/api/auth/status", response_model=AuthStatus, tags=["auth"])
+def auth_status(request: Request, db: Session = Depends(get_db)) -> AuthStatus:
+    user = find_session_user(request, db)
+    if user is not None:
+        return AuthStatus(setup_required=False, user=user)
+    return AuthStatus(setup_required=db.scalar(select(User).limit(1)) is None)
+
+
+@app.post("/api/auth/setup", response_model=UserRead, status_code=status.HTTP_201_CREATED, tags=["auth"])
+def setup_admin(data: SetupCreate, response: Response, db: Session = Depends(get_db)) -> User:
+    if db.scalar(select(User).limit(1)) is not None:
+        raise HTTPException(status_code=409, detail="Počáteční admin už byl vytvořen.")
+    user = User(
+        username=data.username,
+        password_hash=password_digest(data.password),
+        role=UserRole.admin,
+        is_initial_admin=True,
+    )
+    db.add(user)
+    try:
+        db.commit()
+    except IntegrityError as error:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Uživatelské jméno již existuje.") from error
+    db.refresh(user)
+    set_session_cookie(response, user)
+    return user
+
+
+@app.post("/api/auth/login", response_model=UserRead, tags=["auth"])
+def login(data: LoginCreate, response: Response, db: Session = Depends(get_db)) -> User:
+    user = db.scalar(select(User).where(User.username == data.username))
+    if user is None or not password_matches(data.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Uživatelské jméno nebo heslo není správné.")
+    set_session_cookie(response, user)
+    return user
+
+
+@app.post("/api/auth/logout", status_code=status.HTTP_204_NO_CONTENT, tags=["auth"])
+def logout(response: Response) -> None:
+    response.delete_cookie(SESSION_COOKIE)
+
+
+@app.post("/api/auth/password", response_model=UserRead, tags=["auth"])
+def change_password(data: PasswordChange, request: Request, response: Response, db: Session = Depends(get_db)) -> User:
+    user = current_user(request)
+    if not password_matches(data.current_password, user.password_hash):
+        raise HTTPException(status_code=400, detail="Současné heslo není správné.")
+    user.password_hash = password_digest(data.new_password)
+    db.commit()
+    db.refresh(user)
+    set_session_cookie(response, user)
+    return user
+
+
+@app.get("/api/users", response_model=list[UserRead], tags=["users"])
+def list_users(request: Request, db: Session = Depends(get_db)) -> list[User]:
+    admin_user(request)
+    return list(db.scalars(select(User).order_by(User.username)))
+
+
+@app.post("/api/users", response_model=UserRead, status_code=status.HTTP_201_CREATED, tags=["users"])
+def create_user(data: UserCreate, request: Request, db: Session = Depends(get_db)) -> User:
+    admin_user(request)
+    user = User(username=data.username, password_hash=password_digest(data.password), role=data.role)
+    db.add(user)
+    try:
+        db.commit()
+    except IntegrityError as error:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Uživatelské jméno již existuje.") from error
+    db.refresh(user)
+    return user
+
+
+@app.delete("/api/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["users"])
+def delete_user(user_id: str, request: Request, db: Session = Depends(get_db)) -> None:
+    user = admin_user(request)
+    target = db.get(User, user_id)
+    if target is None:
+        raise HTTPException(status_code=404, detail="Uživatel nebyl nalezen.")
+    if target.is_initial_admin:
+        raise HTTPException(status_code=400, detail="Základního admina nelze odstranit.")
+    if user.id == user_id:
+        raise HTTPException(status_code=400, detail="Vlastní účet nelze odstranit.")
+    db.delete(target)
+    db.commit()
 
 
 @app.websocket("/api/webrtc/{device_id}")
@@ -172,7 +391,8 @@ def get_pairing(pairing_id: str, db: Session = Depends(get_db)) -> PairingReques
 
 
 @app.post("/api/pairing/{pairing_id}/confirm", response_model=DeviceRead, tags=["pairing"])
-def confirm_pairing(pairing_id: str, data: PairingConfirm, db: Session = Depends(get_db)) -> Device:
+def confirm_pairing(pairing_id: str, data: PairingConfirm, request: Request, db: Session = Depends(get_db)) -> Device:
+    admin_user(request)
     pairing = db.get(PairingRequest, pairing_id)
     if pairing is None:
         raise HTTPException(status_code=404, detail="Pairing žádost nebyla nalezena.")
@@ -200,7 +420,8 @@ def confirm_pairing(pairing_id: str, data: PairingConfirm, db: Session = Depends
 
 
 @app.post("/api/pairing/{pairing_id}/reject", response_model=PairingRead, tags=["pairing"])
-def reject_pairing(pairing_id: str, db: Session = Depends(get_db)) -> PairingRequest:
+def reject_pairing(pairing_id: str, request: Request, db: Session = Depends(get_db)) -> PairingRequest:
+    admin_user(request)
     pairing = db.get(PairingRequest, pairing_id)
     if pairing is None:
         raise HTTPException(status_code=404, detail="Pairing žádost nebyla nalezena.")
@@ -214,7 +435,8 @@ def reject_pairing(pairing_id: str, db: Session = Depends(get_db)) -> PairingReq
 
 
 @app.post("/api/devices", response_model=DeviceRead, status_code=status.HTTP_201_CREATED, tags=["devices"])
-def create_device(data: DeviceCreate, db: Session = Depends(get_db)) -> Device:
+def create_device(data: DeviceCreate, request: Request, db: Session = Depends(get_db)) -> Device:
+    admin_user(request)
     device = Device(**data.model_dump())
     db.add(device)
     db.add(AuditEvent(device=device, type=EventType.device_registered, message=f"Zařízení {data.name} bylo registrováno."))
@@ -252,7 +474,8 @@ def heartbeat(
 
 
 @app.delete("/api/devices/{device_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["devices"])
-def delete_device(device_id: str, db: Session = Depends(get_db)) -> None:
+def delete_device(device_id: str, request: Request, db: Session = Depends(get_db)) -> None:
+    admin_user(request)
     device = db.get(Device, device_id)
     if device is None:
         raise HTTPException(status_code=404, detail="Zařízení nebylo nalezeno.")

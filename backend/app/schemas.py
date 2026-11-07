@@ -3,7 +3,42 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from .models import CommandStatus, CommandType, DeviceStatus, EventType, PairingStatus
+from .models import CommandStatus, CommandType, DeviceStatus, EventType, PairingStatus, UserRole
+
+
+class SetupCreate(BaseModel):
+    username: str = Field(min_length=3, max_length=120, pattern=r"^[a-zA-Z0-9._-]+$")
+    password: str = Field(min_length=12, max_length=128)
+
+
+class LoginCreate(BaseModel):
+    username: str = Field(min_length=1, max_length=120)
+    password: str = Field(min_length=1, max_length=128)
+
+
+class PasswordChange(BaseModel):
+    current_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=12, max_length=128)
+
+
+class UserCreate(BaseModel):
+    username: str = Field(min_length=3, max_length=120, pattern=r"^[a-zA-Z0-9._-]+$")
+    password: str = Field(min_length=12, max_length=128)
+    role: UserRole = UserRole.user
+
+
+class UserRead(BaseModel):
+    id: str
+    username: str
+    role: UserRole
+    is_initial_admin: bool
+    created_at: datetime
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AuthStatus(BaseModel):
+    setup_required: bool
+    user: UserRead | None = None
 
 
 class DeviceCreate(BaseModel):
