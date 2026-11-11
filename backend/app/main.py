@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from .config import settings
 from .database import Base, SessionLocal, engine, get_db
 from .models import (
-    AuditEvent, Command, CommandStatus, Device, DeviceStatus, EventType, PairingRequest,
+    AuditEvent, Command, CommandStatus, CommandType, Device, DeviceStatus, EventType, PairingRequest,
     PairingStatus, UpdatePackage, User, UserRole,
 )
 from .schemas import (
@@ -142,7 +142,34 @@ def find_session_user(request: Request, db: Session) -> User | None:
 
 @app.middleware("http")
 async def require_authentication(request: Request, call_next):
-    if request.method == "OPTIONS" or not request.url.path.startswith("/api/") or request.url.path in PUBLIC_API_PATHS:
+    path = request.url.path
+    public_pairing_status = (
+        request.method == "GET"
+        and path.startswith("/api/pairing/")
+        and path.count("/") == 3
+    )
+    path_parts = path.strip("/").split("/")
+    public_agent_command = (
+        (
+            request.method == "GET"
+            and len(path_parts) == 4
+            and path_parts[0:2] == ["api", "devices"]
+            and path_parts[3] == "commands"
+        )
+        or (
+            request.method == "PATCH"
+            and len(path_parts) == 5
+            and path_parts[0:2] == ["api", "devices"]
+            and path_parts[3] == "commands"
+        )
+    )
+    if (
+        request.method == "OPTIONS"
+        or not path.startswith("/api/")
+        or path in PUBLIC_API_PATHS
+        or public_pairing_status
+        or public_agent_command
+    ):
         return await call_next(request)
     with SessionLocal() as db:
         user = find_session_user(request, db)
@@ -467,6 +494,24 @@ def heartbeat(
     device.current_app = data.current_app
     if request.client is not None:
         device.ip_address = request.client.host
+    pending_restart = db.scalar(
+        select(Command)
+        .where(
+            Command.device_id == device.id,
+            Command.type == CommandType.restart,
+            Command.status == CommandStatus.acknowledged,
+        )
+        .order_by(Command.created_at.desc())
+    )
+    if pending_restart is not None:
+        pending_restart.status = CommandStatus.completed
+        pending_restart.completed_at = utc_now()
+        db.add(AuditEvent(
+            device=device,
+            type=EventType.command_completed,
+            message=f"Příkaz {pending_restart.type.value} byl dokončen po restartu zařízení.",
+            metadata_json={"command_id": pending_restart.id},
+        ))
     db.add(AuditEvent(device=device, type=EventType.heartbeat, message=f"Heartbeat zařízení {device.name}."))
     db.commit()
     db.refresh(device)
@@ -499,6 +544,23 @@ def create_command(device_id: str, data: CommandCreate, db: Session = Depends(ge
     device = db.get(Device, device_id)
     if device is None:
         raise HTTPException(status_code=404, detail="Zařízení nebylo nalezeno.")
+    active_command = db.scalar(
+        select(Command)
+        .where(
+            Command.device_id == device_id,
+            Command.status.in_((
+                CommandStatus.queued,
+                CommandStatus.sent,
+                CommandStatus.acknowledged,
+            )),
+        )
+        .limit(1)
+    )
+    if active_command is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="Headset ještě nepotvrdil dokončení předchozího příkazu.",
+        )
     command = Command(device_id=device_id, **data.model_dump())
     db.add(command)
     db.add(AuditEvent(device=device, type=EventType.command_created, message=f"Naplánován příkaz: {data.type.value}."))

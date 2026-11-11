@@ -40,9 +40,12 @@ class CommandExecutionService : Service() {
         try {
             if (!updateCommand(baseUrl, deviceId, commandId, "sent", null)) return
             when (command.getString("type")) {
-                "restart" -> getSystemService(DevicePolicyManager::class.java).reboot(
-                    ComponentName(this, OrbitDeviceAdminReceiver::class.java),
-                )
+                "restart" -> {
+                    if (!updateCommand(baseUrl, deviceId, commandId, "acknowledged", null)) return
+                    getSystemService(DevicePolicyManager::class.java).reboot(
+                        ComponentName(this, OrbitDeviceAdminReceiver::class.java),
+                    )
+                }
                 "lock" -> dispatchKioskCommand(MainActivity.ACTION_LOCK, baseUrl, deviceId, commandId)
                 "unlock" -> dispatchKioskCommand(MainActivity.ACTION_UNLOCK, baseUrl, deviceId, commandId)
                 "shutdown" -> updateCommand(

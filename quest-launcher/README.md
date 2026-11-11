@@ -35,14 +35,22 @@ enterprise provisioningem.
 
 ## Spuštění
 
-Otevři adresář `quest-launcher` v Android Studiu a spusť aplikaci na Questu.
-V aplikaci nastav URL backendu dostupnou ze stejné sítě jako headset, například:
+Nainstaluj obě APK. Párování se provádí pouze v aplikaci **Orbit Setup**;
+agent se po potvrzení PINu nastaví a spustí na pozadí. `Orbit Agent` není potřeba
+otevírat pro běžné párování.
+
+V aplikaci Setup nastav URL backendu dostupnou ze stejné sítě jako headset,
+například:
 
 ```text
 http://192.168.1.10:8000
 ```
 
 `localhost` ani `127.0.0.1` na headsetu neodkazují na počítač s backendem.
+
+Setup zobrazí PIN, čeká na jeho potvrzení ve webovém dashboardu a po potvrzení
+uloží připojení do agenta. Tlačítko **Resetovat připojení** zastaví agenta,
+smaže uložené připojení a umožní nové párování.
 
 ## Device owner provisioning
 

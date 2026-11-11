@@ -56,11 +56,11 @@ class MainActivity : Activity() {
         const val PREFS = "orbit_quest"
         const val PAIRED_BACKEND_URL = "paired_backend_url"
         const val PENDING_BACKEND_URL = "pending_backend_url"
-        const val PENDING_PAIRING_ID = "pending_pairing_id"
-        const val PAIRING_PIN = "pairing_pin"
-        const val PAIRING_NONCE = "pairing_nonce"
-        const val DEVICE_NAME = "device_name"
-        const val LOCKED = "locked"
+        backendUrl.isEnabled = false
+        deviceName.isEnabled = false
+        pairButton.isEnabled = false
+        pairButton.visibility = View.GONE
+        resetButton.visibility = View.GONE
         const val SCREEN_CAPTURE_REQUEST = 1001
     }
 
@@ -163,10 +163,8 @@ class MainActivity : Activity() {
 
         status = description(if (isPaired()) {
             "Stav: spárováno, připojuji se k backendu..."
-        } else if (pendingPairingId() != null) {
-            "Stav: čeká na potvrzení PINem $pairingPin ve webu."
         } else {
-            "Stav: připravuji první párování..."
+            "Stav: párování a reset se provádí v aplikaci Orbit Setup."
         })
         status.setPadding(0, 24, 0, 0)
         root.addView(status)
@@ -204,8 +202,6 @@ class MainActivity : Activity() {
                 startAgentService()
                 requestScreenCapturePermissionIfNeeded()
             }
-            pendingPairingId() != null -> pairingHandler.post(pairingPollTask)
-            else -> window.decorView.postDelayed({ sendDiscovery() }, 500)
         }
         if (isPaired() && !ScreenCaptureForegroundService.signalingReady) loadIceServersAndConnect()
     }
