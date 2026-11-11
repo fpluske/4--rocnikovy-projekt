@@ -17,7 +17,8 @@ class AgentConfigurationReceiver : BroadcastReceiver() {
                 if (intent.getBooleanExtra("paired", false)) {
                     val deviceId = intent.getStringExtra("device_id")?.trim() ?: return
                     if (deviceId.isBlank()) return
-                    editor.putString("paired_device_id", deviceId)
+                    editor.putString("paired_backend_url", backendUrl)
+                        .putString("paired_device_id", deviceId)
                         .remove("pending_backend_url")
                         .remove("pending_pairing_id")
                 } else {

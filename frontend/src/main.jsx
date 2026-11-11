@@ -51,9 +51,12 @@ function Dashboard({ user, onLogout }) {
   const [serverStatus, setServerStatus] = useState("unknown");
   const [liveDevices, setLiveDevices] = useState([]);
   const [selectedLiveDeviceIds, setSelectedLiveDeviceIds] = useState([]);
+  const [expandedDeviceIds, setExpandedDeviceIds] = useState([]);
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem("orbit-theme") === "dark");
   const [passwordForm, setPasswordForm] = useState({ current_password: "", new_password: "" });
   const [passwordOpen, setPasswordOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [activeView, setActiveView] = useState("dashboard");
 
   useEffect(() => {
     document.documentElement.dataset.theme = darkMode ? "dark" : "light";
@@ -110,6 +113,7 @@ function Dashboard({ user, onLogout }) {
     try {
       await request(`/api/devices/${device.id}`, { method: "DELETE" });
       setSelectedLiveDeviceIds((current) => current.filter((id) => id !== device.id));
+      setExpandedDeviceIds((current) => current.filter((id) => id !== device.id));
       setMessage("Zařízení bylo odstraněno.");
       await loadDevices();
     } catch (error) { setMessage(error.message); }
@@ -157,6 +161,11 @@ function Dashboard({ user, onLogout }) {
       ? current.filter((id) => !onlineDevices.some((device) => device.id === id))
       : [...new Set([...current, ...onlineDevices.map((device) => device.id)])]);
   };
+  const toggleDeviceDetails = (deviceId) => {
+    setExpandedDeviceIds((current) => current.includes(deviceId)
+      ? current.filter((id) => id !== deviceId)
+      : [...current, deviceId]);
+  };
 
   const changePassword = async (event) => {
     event.preventDefault();
@@ -169,16 +178,54 @@ function Dashboard({ user, onLogout }) {
   };
 
   return <main>
-    <header><div><p className="eyebrow">ORBIT / PROTOTYP</p><h1>Správa Quest headsetů</h1><p className="muted">Přehled zařízení a čekajících párování.</p></div><div className="header-actions"><span className="user-badge">{user.username} · {user.role}</span><span className={`server-connection ${serverStatus}`}><span className="connection-dot" />{connectionLabels[serverStatus]}</span><button className="secondary theme-button" onClick={() => setDarkMode((current) => !current)} aria-pressed={darkMode}>{darkMode ? "Světlý režim" : "Tmavý režim"}</button><button className="secondary" onClick={loadDevices}>Obnovit</button><button className="secondary" onClick={() => setPasswordOpen((current) => !current)}>Změnit heslo</button>{user.role === "admin" && <button className="primary pairing-button" onClick={() => setPairingOpen(true)}>Párovat zařízení</button>}<button className="secondary" onClick={onLogout}>Odhlásit</button></div></header>
+    <header><div><h1>Orbit Management</h1><p className="muted">{activeView === "users" ? "Správa uživatelských účtů." : "Přehled zařízení a čekajících párování."}</p></div><div className="header-actions"><span className={`server-connection ${serverStatus}`} aria-label={connectionLabels[serverStatus]} title={connectionLabels[serverStatus]}>{serverStatus === "online" ? "✓" : serverStatus === "offline" ? "×" : "…"}</span><button className="icon-button secondary" onClick={() => setDarkMode((current) => !current)} aria-label={darkMode ? "Přepnout na světlý režim" : "Přepnout na tmavý režim"} title={darkMode ? "Světlý režim" : "Tmavý režim"}>{darkMode ? "☀" : "☾"}</button>{user.role === "admin" && <button className="nav-button secondary" onClick={() => setActiveView((current) => current === "users" ? "dashboard" : "users")}>{activeView === "users" ? "Zařízení" : "Uživatelé"}</button>}<div className="profile-menu"><button className="profile-button" onClick={() => setProfileOpen((current) => !current)} aria-expanded={profileOpen} aria-haspopup="menu" aria-label="Otevřít profil" title="Profil"><span className="profile-avatar">{user.username.slice(0, 1).toUpperCase()}</span></button>{profileOpen && <div className="profile-dropdown" role="menu"><div className="profile-summary"><strong>{user.username}</strong><span>{user.role}</span></div><button role="menuitem" onClick={() => { setPasswordOpen((current) => !current); setProfileOpen(false); }}>Změnit heslo</button><button role="menuitem" onClick={onLogout}>Odhlásit</button></div>}</div></div></header>
     {message && <div className="notice">{message}</div>}
     {passwordOpen && <section className="card password-card"><div className="section-heading"><h2>Změnit heslo</h2><button className="close-button" onClick={() => setPasswordOpen(false)} aria-label="Zavřít">×</button></div><form className="password-form" onSubmit={changePassword}><label>Současné heslo<input required type="password" value={passwordForm.current_password} onChange={(e) => setPasswordForm({ ...passwordForm, current_password: e.target.value })} /></label><label>Nové heslo<input required minLength="12" type="password" value={passwordForm.new_password} onChange={(e) => setPasswordForm({ ...passwordForm, new_password: e.target.value })} placeholder="min. 12 znaků" /></label><button className="primary">Uložit nové heslo</button></form></section>}
+    {activeView === "users" ? <UserManagement setMessage={setMessage} /> : <>
     {pairingOpen && user.role === "admin" && <section className="card pairing-form-card"><div className="section-heading"><div><p className="eyebrow">NOVÉ ZAŘÍZENÍ</p><h2>Spustit párování</h2></div><button className="close-button" onClick={() => setPairingOpen(false)} aria-label="Zavřít">×</button></div><p className="muted">V prototypu zde simulujete discovery packet z aplikace headsetu.</p><form className="pairing-form" onSubmit={discoverDevice}><label>Název headsetu<input required autoFocus value={pairingForm.name} onChange={(e) => setPairingForm({ ...pairingForm, name: e.target.value })} placeholder="Např. Quest učebna 1" /></label><label>Sériové číslo<input required value={pairingForm.serial_number} onChange={(e) => setPairingForm({ ...pairingForm, serial_number: e.target.value })} /></label><label>PIN z headsetu<input required inputMode="numeric" pattern="[0-9]{4}" maxLength="4" value={pairingForm.pin} onChange={(e) => setPairingForm({ ...pairingForm, pin: e.target.value.replace(/\D/g, "") })} placeholder="4 číslice" /></label><div className="form-actions"><button type="button" onClick={() => setPairingOpen(false)}>Zrušit</button><button className="primary">Odeslat discovery</button></div></form></section>}
     {pairings.length > 0 && user.role === "admin" && <section className="card pairing-card"><div className="section-heading"><h2>Čekající párování</h2><span>{pairings.length} nové</span></div>{pairings.map((pairing) => <article className="device" key={pairing.id}><div><h3>{pairing.name}</h3><p className="muted">{pairing.model} · {pairing.serial_number}</p><span className="status unknown">čeká na potvrzení</span></div><div className="pairing-actions"><button className="primary" onClick={() => confirmPairing(pairing)}>Potvrdit PINem</button><button className="danger" onClick={() => rejectPairing(pairing)}>Odmítnout</button></div></article>)}</section>}
     <section className="layout">
-      <section className="card devices-card"><div className="section-heading"><div><h2>Zařízení</h2><span>{devices.length} celkem</span></div>{devices.length > 0 && <div className="live-selection-actions"><button className="secondary" onClick={toggleAllOnlineSelection} disabled={onlineDevices.length === 0}>{allOnlineSelected ? "Zrušit výběr" : "Vybrat online"}</button><button className="primary" onClick={openSelectedLiveViews} disabled={selectedLiveDeviceIds.length === 0}>Sledovat vybrané ({selectedLiveDeviceIds.length})</button></div>}</div>{loading ? <p className="muted">Načítám...</p> : devices.length === 0 ? <div className="empty"><p>Zatím není spárován žádný headset.</p>{user.role === "admin" && <button className="primary" onClick={() => setPairingOpen(true)}>Párovat první zařízení</button>}</div> : <div className="device-list">{devices.map((device) => { const isLive = liveDevices.some((liveDevice) => liveDevice.id === device.id); const isSelected = selectedLiveDeviceIds.includes(device.id); const updateAvailable = isUpdateAvailable(device.firmware_version, latestUpdate?.version); return <article className="device" key={device.id}><div className="device-info"><label className="live-checkbox"><input type="checkbox" checked={isSelected} disabled={device.status !== "online"} onChange={() => toggleLiveDeviceSelection(device.id)} aria-label={`Vybrat přenos ${device.name}`} /><span>Vybrat přenos</span></label><div><h3>{device.name}</h3><p className="muted">{device.model} · {device.serial_number}</p><span className={`status ${device.status}`}>{statusLabels[device.status] || device.status}</span><p className="firmware-version">Horizon OS: {device.horizon_os_version || "nezjištěna"}{device.horizon_os_update_pending && <strong> · Čeká systémová aktualizace</strong>}</p><p className="firmware-version">Orbit Agent: {device.firmware_version || "nezjištěna"}{updateAvailable && <strong> · Dostupná aktualizace: {latestUpdate.version}</strong>}</p>{device.last_seen_at && <p className="last-seen">Poslední kontakt: {new Date(device.last_seen_at).toLocaleString("cs-CZ")}</p>}</div></div><div className="actions"><button className="live-button" disabled={device.status !== "online" || isLive} onClick={() => openLiveView(device)}>{isLive ? "Sleduji" : "Živě"}</button><button onClick={() => sendCommand(device, "restart")}>Restart</button><button onClick={() => sendCommand(device, "lock")}>Uzamknout</button><button onClick={() => sendCommand(device, "unlock")}>Odemknout</button>{user.role === "admin" && <button className="danger" onClick={() => removeDevice(device)}>Odstranit</button>}</div></article>; })}</div>}</section>
+      <section className="card devices-card"><div className="section-heading"><div><h2>Zařízení</h2><span>{devices.length} celkem</span></div>{devices.length > 0 && <div className="live-selection-actions">{user.role === "admin" && <button className="primary pairing-button" onClick={() => setPairingOpen(true)}>Párovat zařízení</button>}<button className="icon-button secondary" onClick={loadDevices} aria-label="Obnovit zařízení" title="Obnovit">↻</button><button className="secondary" onClick={toggleAllOnlineSelection} disabled={onlineDevices.length === 0}>{allOnlineSelected ? "Zrušit výběr" : "Vybrat online"}</button><button className="primary" onClick={openSelectedLiveViews} disabled={selectedLiveDeviceIds.length === 0}>Sledovat vybrané ({selectedLiveDeviceIds.length})</button></div>}</div>{loading ? <p className="muted">Načítám...</p> : devices.length === 0 ? <div className="empty"><p>Zatím není spárován žádný headset.</p>{user.role === "admin" && <button className="primary" onClick={() => setPairingOpen(true)}>Párovat první zařízení</button>}</div> : <div className="device-list">{devices.map((device) => {
+        const isLive = liveDevices.some((liveDevice) => liveDevice.id === device.id);
+        const isSelected = selectedLiveDeviceIds.includes(device.id);
+        const isExpanded = expandedDeviceIds.includes(device.id);
+        const updateAvailable = isUpdateAvailable(device.firmware_version, latestUpdate?.version);
+        return <article className={`device ${isExpanded ? "expanded" : ""}`} key={device.id}>
+          <div className="device-summary">
+            <div className="device-info">
+              <label className="live-checkbox">
+                <input type="checkbox" checked={isSelected} disabled={device.status !== "online"} onChange={() => toggleLiveDeviceSelection(device.id)} aria-label={`Vybrat přenos ${device.name}`} />
+              </label>
+              <div>
+                <div className="device-heading">
+                  <h3>{device.name}</h3>
+                  <span className={`status ${device.status}`}>{statusLabels[device.status] || device.status}</span>
+                </div>
+                <p className="muted">{device.model} · {device.serial_number}</p>
+                <div className="current-app"><span className="app-logo" aria-hidden="true">O</span><span><span className="current-app-label">Aktuální aplikace</span><strong>{device.current_app || "Nezjištěna"}</strong></span></div>
+              </div>
+            </div>
+            <div className="actions">
+              <button className="live-button" disabled={device.status !== "online" || isLive} onClick={() => openLiveView(device)}>{isLive ? "Sleduji" : "Živě"}</button>
+              <button onClick={() => sendCommand(device, "restart")}>Restart</button>
+              <button onClick={() => sendCommand(device, "lock")}>Uzamknout</button>
+              <button onClick={() => sendCommand(device, "unlock")}>Odemknout</button>
+              {user.role === "admin" && <button className="danger" onClick={() => removeDevice(device)}>Odstranit</button>}
+              <button className="details-toggle" onClick={() => toggleDeviceDetails(device.id)} aria-expanded={isExpanded} aria-label={`${isExpanded ? "Skrýt" : "Zobrazit"} podrobnosti zařízení ${device.name}`}>
+                <span aria-hidden="true">{isExpanded ? "⌃" : "⌄"}</span>
+              </button>
+            </div>
+          </div>
+          {isExpanded && <div className="device-details">
+            <p className="firmware-version">Horizon OS: {device.horizon_os_version || "nezjištěna"}{device.horizon_os_update_pending && <strong> · Čeká systémová aktualizace</strong>}</p>
+            <p className="firmware-version">Orbit Agent: {device.firmware_version || "nezjištěna"}{updateAvailable && <strong> · Dostupná aktualizace: {latestUpdate.version}</strong>}</p>
+            {device.last_seen_at && <p className="last-seen">Poslední kontakt: {new Date(device.last_seen_at).toLocaleString("cs-CZ")}</p>}
+          </div>}
+        </article>;
+      })}</div>}</section>
     </section>
-    {user.role === "admin" && <UserManagement setMessage={setMessage} />}
     {liveDevices.length > 0 && <LiveViewGallery devices={liveDevices} onClose={closeLiveView} onCloseAll={() => setLiveDevices([])} />}
+    </>}
   </main>;
 }
 

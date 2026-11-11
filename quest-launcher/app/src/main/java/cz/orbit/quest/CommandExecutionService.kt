@@ -46,8 +46,16 @@ class CommandExecutionService : Service() {
                         ComponentName(this, OrbitDeviceAdminReceiver::class.java),
                     )
                 }
-                "lock" -> dispatchKioskCommand(MainActivity.ACTION_LOCK, baseUrl, deviceId, commandId)
-                "unlock" -> dispatchKioskCommand(MainActivity.ACTION_UNLOCK, baseUrl, deviceId, commandId)
+                "lock" -> {
+                    if (updateCommand(baseUrl, deviceId, commandId, "acknowledged", null)) {
+                        dispatchKioskCommand(MainActivity.ACTION_LOCK, baseUrl, deviceId, commandId)
+                    }
+                }
+                "unlock" -> {
+                    if (updateCommand(baseUrl, deviceId, commandId, "acknowledged", null)) {
+                        dispatchKioskCommand(MainActivity.ACTION_UNLOCK, baseUrl, deviceId, commandId)
+                    }
+                }
                 "shutdown" -> updateCommand(
                     baseUrl, deviceId, commandId, "failed",
                     "Android neposkytuje aplikaci API pro vypnutí zařízení; použijte uzamčení.",
@@ -64,8 +72,10 @@ class CommandExecutionService : Service() {
         startActivity(Intent(this, MainActivity::class.java).apply {
             this.action = action
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            putExtra(MainActivity.EXTRA_COMMAND_BASE_URL, baseUrl)
+            putExtra(MainActivity.EXTRA_COMMAND_DEVICE_ID, deviceId)
+            putExtra(MainActivity.EXTRA_COMMAND_ID, commandId)
         })
-        updateCommand(baseUrl, deviceId, commandId, "completed", null)
     }
 
     private fun updateCommand(

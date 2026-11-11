@@ -39,8 +39,7 @@
         </receiver>
         <receiver
             android:name=".AgentConfigurationReceiver"
-            android:exported="true"
-            android:permission="cz.orbit.quest.permission.CONFIGURE_AGENT" />
+            android:exported="true" />
         <receiver
             android:name=".OrbitDeviceAdminReceiver"
             android:exported="true"

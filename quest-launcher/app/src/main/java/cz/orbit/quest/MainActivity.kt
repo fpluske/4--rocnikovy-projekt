@@ -52,15 +52,18 @@ class MainActivity : Activity() {
     companion object {
         const val ACTION_LOCK = "cz.orbit.quest.action.LOCK"
         const val ACTION_UNLOCK = "cz.orbit.quest.action.UNLOCK"
+        const val EXTRA_COMMAND_BASE_URL = "command_base_url"
+        const val EXTRA_COMMAND_DEVICE_ID = "command_device_id"
+        const val EXTRA_COMMAND_ID = "command_id"
         const val PAIRING_POLL_INTERVAL_MS = 3_000L
         const val PREFS = "orbit_quest"
         const val PAIRED_BACKEND_URL = "paired_backend_url"
         const val PENDING_BACKEND_URL = "pending_backend_url"
-        backendUrl.isEnabled = false
-        deviceName.isEnabled = false
-        pairButton.isEnabled = false
-        pairButton.visibility = View.GONE
-        resetButton.visibility = View.GONE
+        const val PAIRING_PIN = "pairing_pin"
+        const val PAIRING_NONCE = "pairing_nonce"
+        const val DEVICE_NAME = "device_name"
+        const val PENDING_PAIRING_ID = "pending_pairing_id"
+        const val LOCKED = "locked"
         const val SCREEN_CAPTURE_REQUEST = 1001
     }
 
@@ -678,8 +681,53 @@ class MainActivity : Activity() {
 
     private fun handleCommandIntent(intent: Intent?) {
         when (intent?.action) {
-            ACTION_LOCK -> window.decorView.post { enterKioskMode() }
-            ACTION_UNLOCK -> window.decorView.post { exitKioskMode() }
+            ACTION_LOCK -> window.decorView.post {
+                executeKioskCommand(intent) { enterKioskMode() }
+            }
+            ACTION_UNLOCK -> window.decorView.post {
+                executeKioskCommand(intent) { exitKioskMode() }
+            }
+        }
+    }
+
+    private fun executeKioskCommand(intent: Intent, action: () -> Unit) {
+        try {
+            action()
+            reportCommandResult(intent, "completed", null)
+        } catch (error: Exception) {
+            Log.w("OrbitQuest", "Kioskový příkaz se nepodařilo vykonat.", error)
+            reportCommandResult(intent, "failed", error.message ?: "Neznámá chyba.")
+        }
+    }
+
+    private fun reportCommandResult(intent: Intent, commandStatus: String, errorMessage: String?) {
+        val baseUrl = intent.getStringExtra(EXTRA_COMMAND_BASE_URL) ?: return
+        val deviceId = intent.getStringExtra(EXTRA_COMMAND_DEVICE_ID) ?: return
+        val commandId = intent.getStringExtra(EXTRA_COMMAND_ID) ?: return
+        thread {
+            try {
+                val connection = (URI("$baseUrl/api/devices/$deviceId/commands/$commandId")
+                    .toURL().openConnection() as HttpURLConnection).apply {
+                    requestMethod = "PATCH"
+                    connectTimeout = 5000
+                    readTimeout = 5000
+                    doOutput = true
+                    setRequestProperty("Content-Type", "application/json")
+                }
+                connection.outputStream.use {
+                    it.write(JSONObject()
+                        .put("status", commandStatus)
+                        .put("error_message", errorMessage)
+                        .toString()
+                        .toByteArray())
+                }
+                if (connection.responseCode !in 200..299) {
+                    throw IOException("HTTP ${connection.responseCode}")
+                }
+                connection.disconnect()
+            } catch (error: Exception) {
+                Log.w("OrbitQuest", "Stav kioskového příkazu se nepodařilo uložit.", error)
+            }
         }
     }
 

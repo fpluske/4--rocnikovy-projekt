@@ -93,6 +93,7 @@ class SetupActivity : Activity() {
 
     override fun onStart() {
         super.onStart()
+        reconfigureAgentIfPaired()
         if (pendingPairingId() != null) {
             handler.removeCallbacks(pollTask)
             handler.post(pollTask)
@@ -206,7 +207,7 @@ class SetupActivity : Activity() {
         sendBroadcast(Intent().apply {
             component = ComponentName("cz.orbit.quest", "cz.orbit.quest.AgentConfigurationReceiver")
             action = "cz.orbit.quest.action.RESET"
-        }, "cz.orbit.quest.permission.CONFIGURE_AGENT")
+        })
         preferences.edit()
             .putBoolean("paired", false)
             .remove("pairing_id")
@@ -229,10 +230,18 @@ class SetupActivity : Activity() {
             putExtra("device_name", name)
             putExtra("device_id", deviceId)
             putExtra("paired", true)
-        }, "cz.orbit.quest.permission.CONFIGURE_AGENT")
+        })
     }
 
     private fun pendingPairingId() = preferences.getString("pairing_id", null)
+
+    private fun reconfigureAgentIfPaired() {
+        if (!preferences.getBoolean("paired", false)) return
+        val url = preferences.getString("backend_url", null) ?: return
+        val name = preferences.getString("device_name", null) ?: return
+        val deviceId = preferences.getString("device_id", null) ?: return
+        sendAgentConfiguration(url, name, deviceId)
+    }
 
     private fun updateControls() {
         val paired = preferences.getBoolean("paired", false)
