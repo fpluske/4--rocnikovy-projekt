@@ -4,6 +4,7 @@
 body { margin: 0; color: var(--text); background: var(--page-background); transition: color .2s, background-color .2s; }
 main { max-width: 1280px; margin: 0 auto; padding: 40px 24px; }
 header, .section-heading, .device, .actions, .header-actions, .form-actions { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.brand { display: flex; align-items: center; }
 h1, h2, h3, p { margin-top: 0; }
 h1 { margin-bottom: 8px; font-size: clamp(2rem, 5vw, 3.3rem); }
 h2 { margin-bottom: 24px; }
@@ -76,6 +77,17 @@ button:hover { filter: brightness(.96); }
 .current-app > span:last-child { display: grid; gap: 1px; }
 .current-app-label { color: var(--muted); font-size: .7rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
 .current-app strong { font-size: .85rem; }
+.battery-indicators { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 14px; }
+.battery-indicator { display: inline-flex; min-width: 116px; align-items: center; gap: 8px; }
+.battery-icon { position: relative; display: inline-flex; width: 30px; height: 15px; align-items: center; padding: 2px; border: 2px solid var(--muted); border-radius: 4px; }
+.battery-icon::after { position: absolute; top: 3px; right: -5px; width: 3px; height: 5px; background: var(--muted); border-radius: 0 2px 2px 0; content: ""; }
+.battery-icon span { display: block; height: 100%; background: #218c83; border-radius: 1px; }
+.battery-info { display: grid; gap: 1px; }
+.battery-info strong { font-size: .76rem; }
+.battery-value { color: #218c83; font-size: .78rem; font-weight: 800; }
+.battery-value.medium { color: #a87900; }
+.battery-value.low { color: #a43b3b; }
+.battery-value.unknown { color: var(--muted); }
 .device-details { margin: 14px 0 0 38px; padding: 14px 0 0; border-top: 1px solid var(--divider); }
 .device-details p { margin-bottom: 8px; }
 .details-toggle { display: grid; width: 34px; height: 34px; padding: 0; place-items: center; color: var(--muted); background: transparent; border: 1px solid var(--input-border); font-size: 1.15rem; line-height: 1; }

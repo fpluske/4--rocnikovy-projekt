@@ -17,6 +17,23 @@ const connectionLabels = {
   unknown: "Ověřuji server",
 };
 
+function BatteryIndicator({ label, percent }) {
+  const level = percent === null || percent === undefined ? "unknown" : percent <= 30 ? "low" : percent <= 60 ? "medium" : "high";
+  const fillWidth = percent === null || percent === undefined ? 0 : Math.max(0, Math.min(100, percent));
+  return <div className="battery-indicator" title={`${label}: ${percent === null || percent === undefined ? "nezjištěno" : `${percent} %`}`}>
+    <span className="battery-icon" aria-hidden="true"><span style={{ width: `${fillWidth}%` }} /></span>
+    <span className="battery-info"><strong>{label}</strong><span className={`battery-value ${level}`}>{percent === null || percent === undefined ? "—" : `${percent} %`}</span></span>
+  </div>;
+}
+
+function BatteryIndicators({ device }) {
+  return <div className="battery-indicators" aria-label="Stav baterií">
+    <BatteryIndicator label="Headset" percent={device.battery_percent} />
+    <BatteryIndicator label="Levý ovladač" percent={device.left_controller_battery_percent} />
+    <BatteryIndicator label="Pravý ovladač" percent={device.right_controller_battery_percent} />
+  </div>;
+}
+
 function isUpdateAvailable(currentVersion, latestVersion) {
   if (!currentVersion || !latestVersion) return false;
   const current = currentVersion.split(".").map((part) => Number.parseInt(part, 10) || 0);
@@ -178,7 +195,7 @@ function Dashboard({ user, onLogout }) {
   };
 
   return <main>
-    <header><div><h1>Orbit Management</h1><p className="muted">{activeView === "users" ? "Správa uživatelských účtů." : "Přehled zařízení a čekajících párování."}</p></div><div className="header-actions"><span className={`server-connection ${serverStatus}`} aria-label={connectionLabels[serverStatus]} title={connectionLabels[serverStatus]}>{serverStatus === "online" ? "✓" : serverStatus === "offline" ? "×" : "…"}</span><button className="icon-button secondary" onClick={() => setDarkMode((current) => !current)} aria-label={darkMode ? "Přepnout na světlý režim" : "Přepnout na tmavý režim"} title={darkMode ? "Světlý režim" : "Tmavý režim"}>{darkMode ? "☀" : "☾"}</button>{user.role === "admin" && <button className="nav-button secondary" onClick={() => setActiveView((current) => current === "users" ? "dashboard" : "users")}>{activeView === "users" ? "Zařízení" : "Uživatelé"}</button>}<div className="profile-menu"><button className="profile-button" onClick={() => setProfileOpen((current) => !current)} aria-expanded={profileOpen} aria-haspopup="menu" aria-label="Otevřít profil" title="Profil"><span className="profile-avatar">{user.username.slice(0, 1).toUpperCase()}</span></button>{profileOpen && <div className="profile-dropdown" role="menu"><div className="profile-summary"><strong>{user.username}</strong><span>{user.role}</span></div><button role="menuitem" onClick={() => { setPasswordOpen((current) => !current); setProfileOpen(false); }}>Změnit heslo</button><button role="menuitem" onClick={onLogout}>Odhlásit</button></div>}</div></div></header>
+    <header><div className="brand"><h1>Orbit Hub</h1></div><div className="header-actions"><span className={`server-connection ${serverStatus}`} aria-label={connectionLabels[serverStatus]} title={connectionLabels[serverStatus]}>{serverStatus === "online" ? "✓" : serverStatus === "offline" ? "×" : "…"}</span><button className="icon-button secondary" onClick={() => setDarkMode((current) => !current)} aria-label={darkMode ? "Přepnout na světlý režim" : "Přepnout na tmavý režim"} title={darkMode ? "Světlý režim" : "Tmavý režim"}>{darkMode ? "☀" : "☾"}</button>{user.role === "admin" && <button className="nav-button secondary" onClick={() => setActiveView((current) => current === "users" ? "dashboard" : "users")}>{activeView === "users" ? "Zařízení" : "Uživatelé"}</button>}<div className="profile-menu"><button className="profile-button" onClick={() => setProfileOpen((current) => !current)} aria-expanded={profileOpen} aria-haspopup="menu" aria-label="Otevřít profil" title="Profil"><span className="profile-avatar">{user.username.slice(0, 1).toUpperCase()}</span></button>{profileOpen && <div className="profile-dropdown" role="menu"><div className="profile-summary"><strong>{user.username}</strong><span>{user.role}</span></div><button role="menuitem" onClick={() => { setPasswordOpen((current) => !current); setProfileOpen(false); }}>Změnit heslo</button><button role="menuitem" onClick={onLogout}>Odhlásit</button></div>}</div></div></header>
     {message && <div className="notice">{message}</div>}
     {passwordOpen && <section className="card password-card"><div className="section-heading"><h2>Změnit heslo</h2><button className="close-button" onClick={() => setPasswordOpen(false)} aria-label="Zavřít">×</button></div><form className="password-form" onSubmit={changePassword}><label>Současné heslo<input required type="password" value={passwordForm.current_password} onChange={(e) => setPasswordForm({ ...passwordForm, current_password: e.target.value })} /></label><label>Nové heslo<input required minLength="12" type="password" value={passwordForm.new_password} onChange={(e) => setPasswordForm({ ...passwordForm, new_password: e.target.value })} placeholder="min. 12 znaků" /></label><button className="primary">Uložit nové heslo</button></form></section>}
     {activeView === "users" ? <UserManagement setMessage={setMessage} /> : <>
@@ -203,6 +220,7 @@ function Dashboard({ user, onLogout }) {
                 </div>
                 <p className="muted">{device.model} · {device.serial_number}</p>
                 <div className="current-app"><span className="app-logo" aria-hidden="true">O</span><span><span className="current-app-label">Aktuální aplikace</span><strong>{device.current_app || "Nezjištěna"}</strong></span></div>
+                <BatteryIndicators device={device} />
               </div>
             </div>
             <div className="actions">

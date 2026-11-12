@@ -51,6 +51,8 @@ class DeviceRead(DeviceCreate):
     id: str
     status: DeviceStatus
     battery_percent: int | None
+    left_controller_battery_percent: int | None
+    right_controller_battery_percent: int | None
     firmware_version: str | None
     horizon_os_version: str | None
     horizon_os_update_pending: bool
@@ -66,6 +68,8 @@ class DeviceHeartbeat(BaseModel):
     serial_number: str = Field(min_length=1, max_length=120)
     status: DeviceStatus = DeviceStatus.online
     battery_percent: int | None = Field(default=None, ge=0, le=100)
+    left_controller_battery_percent: int | None = Field(default=None, ge=0, le=100)
+    right_controller_battery_percent: int | None = Field(default=None, ge=0, le=100)
     firmware_version: str | None = Field(default=None, max_length=80)
     horizon_os_version: str | None = Field(default=None, max_length=120)
     horizon_os_update_pending: bool = False

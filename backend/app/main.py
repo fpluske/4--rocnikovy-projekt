@@ -37,6 +37,14 @@ def ensure_device_status_columns() -> None:
             connection.execute(text(
                 "ALTER TABLE devices ADD COLUMN horizon_os_update_pending BOOLEAN NOT NULL DEFAULT FALSE"
             ))
+        if "left_controller_battery_percent" not in columns:
+            connection.execute(text(
+                "ALTER TABLE devices ADD COLUMN left_controller_battery_percent INTEGER"
+            ))
+        if "right_controller_battery_percent" not in columns:
+            connection.execute(text(
+                "ALTER TABLE devices ADD COLUMN right_controller_battery_percent INTEGER"
+            ))
 
 
 ensure_device_status_columns()
@@ -488,6 +496,8 @@ def heartbeat(
     device.status = data.status
     device.last_seen_at = utc_now()
     device.battery_percent = data.battery_percent
+    device.left_controller_battery_percent = data.left_controller_battery_percent
+    device.right_controller_battery_percent = data.right_controller_battery_percent
     device.firmware_version = data.firmware_version
     device.horizon_os_version = data.horizon_os_version
     device.horizon_os_update_pending = data.horizon_os_update_pending
