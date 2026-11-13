@@ -49,6 +49,9 @@ def ensure_device_status_columns() -> None:
             connection.execute(text(
                 "ALTER TABLE devices ADD COLUMN is_charging BOOLEAN"
             ))
+        if "installed_apps" not in columns:
+            connection.execute(text("ALTER TABLE devices ADD COLUMN installed_apps JSON"))
+        connection.execute(text("UPDATE devices SET installed_apps = '[]' WHERE installed_apps IS NULL"))
 
 
 ensure_device_status_columns()
@@ -507,6 +510,7 @@ def heartbeat(
     device.horizon_os_version = data.horizon_os_version
     device.horizon_os_update_pending = data.horizon_os_update_pending
     device.current_app = data.current_app
+    device.installed_apps = [installed_app.model_dump() for installed_app in data.installed_apps]
     if request.client is not None:
         device.ip_address = request.client.host
     pending_restart = db.scalar(

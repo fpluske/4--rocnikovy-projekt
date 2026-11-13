@@ -78,6 +78,7 @@ button:hover { filter: brightness(.96); }
 .current-app > span:last-child { display: grid; gap: 1px; }
 .current-app-label { color: var(--muted); font-size: .7rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
 .current-app strong { font-size: .85rem; }
+.apps-button { margin: 12px 0 2px; }
 .battery-indicators { display: flex; flex-wrap: wrap; margin-top: 12px; }
 .battery-indicator { display: inline-flex; min-width: 116px; align-items: center; gap: 8px; }
 .battery-icon { position: relative; display: inline-flex; width: 30px; height: 15px; align-items: center; padding: 2px; border: 2px solid var(--muted); border-radius: 4px; }
@@ -115,6 +116,20 @@ button:hover { filter: brightness(.96); }
 .live-backdrop { position: fixed; inset: 0; z-index: 10; display: grid; place-items: center; padding: 24px; background: #17202bcc; }
 .live-modal { width: min(1200px, 100%); max-height: calc(100vh - 48px); overflow: auto; padding: 24px; background: var(--modal-background); border-radius: 16px; box-shadow: 0 18px 60px #0006; }
 .live-modal h2 { margin-bottom: 0; }
+.apps-modal { width: min(1050px, 100%); }
+.apps-filters { display: grid; grid-template-columns: 1fr 240px; gap: 10px; margin: 22px 0 16px; }
+.apps-filters input { background: var(--card); }
+.system-apps-toggle { display: flex; align-items: center; justify-content: flex-start; gap: 8px; padding: 0 10px; white-space: nowrap; }
+.system-apps-toggle input { width: 16px; height: 16px; margin: 0; accent-color: #218c83; }
+.apps-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 10px; max-height: calc(100vh - 220px); overflow-y: auto; }
+.app-card { display: flex; min-width: 0; align-items: center; gap: 12px; padding: 12px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; }
+.app-card img, .app-card-placeholder { display: grid; width: 48px; height: 48px; flex: 0 0 48px; place-items: center; color: #fff; background: linear-gradient(135deg, #218c83, #155b68); border-radius: 11px; object-fit: cover; font-weight: 850; }
+.app-card-info { min-width: 0; flex: 1; }
+.app-launch-button { padding: 7px 9px; font-size: .75rem; white-space: nowrap; }
+.app-card h3, .app-card p, .app-card small { overflow: hidden; margin: 0; text-overflow: ellipsis; white-space: nowrap; }
+.app-card h3 { font-size: .9rem; }
+.app-card p { margin-top: 3px; color: var(--muted); font-size: .72rem; }
+.app-card small { display: block; margin-top: 5px; color: var(--muted); font-size: .7rem; }
 .live-actions { display: flex; align-items: center; gap: 8px; }
 .live-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 18px; }
 .live-card { min-width: 0; padding: 14px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; }
@@ -139,6 +154,7 @@ button:hover { filter: brightness(.96); }
   .device-summary { width: 100%; align-items: flex-start; flex-direction: column; }
   .device-details { margin-left: 0; }
   .live-actions { flex-wrap: wrap; justify-content: flex-end; }
+  .apps-filters { grid-template-columns: 1fr; }
   .user-form { grid-template-columns: 1fr; }
   .password-form { grid-template-columns: 1fr; }
   .user-row { align-items: flex-start; flex-wrap: wrap; }

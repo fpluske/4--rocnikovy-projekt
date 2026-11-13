@@ -11,7 +11,10 @@ import android.content.ComponentName
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.BroadcastReceiver
+import android.content.pm.PackageManager
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.app.ActivityManager
 import android.os.BatteryManager
 import android.os.Build
@@ -22,6 +25,8 @@ import android.os.PowerManager
 import android.provider.Settings
 import android.util.Log
 import java.io.IOException
+import java.io.ByteArrayOutputStream
+import android.util.Base64
 import java.net.HttpURLConnection
 import java.net.URI
 import java.util.UUID
@@ -55,6 +60,7 @@ class OrbitAgentService : Service() {
     private val heartbeatInFlight = AtomicBoolean(false)
     private val commandPollInFlight = AtomicBoolean(false)
     private val deviceStatus = AtomicReference("online")
+    private var installedApps: JSONArray? = null
     private val screenStateReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             val status = when (intent.action) {
@@ -148,6 +154,7 @@ class OrbitAgentService : Service() {
                             ) != null,
                         )
                         .put("current_app", readCurrentApp())
+                        .put("installed_apps", readInstalledApps())
                         .toString()
                         .toByteArray())
                 }
@@ -199,6 +206,56 @@ class OrbitAgentService : Service() {
             } catch (error: android.content.pm.PackageManager.NameNotFoundException) {
                 packageName
             }
+        }
+    }
+
+    private fun readInstalledApps(): JSONArray {
+        installedApps?.let { return it }
+        return try {
+            val applications = packageManager
+                .getInstalledApplications(PackageManager.GET_META_DATA)
+                .sortedBy { packageManager.getApplicationLabel(it).toString().lowercase() }
+            val apps = JSONArray()
+            applications.forEach { applicationInfo ->
+                val packageName = applicationInfo.packageName
+                val label = packageManager.getApplicationLabel(applicationInfo).toString().ifBlank { packageName }
+                val versionName = try {
+                    packageManager.getPackageInfo(packageName, 0).versionName
+                } catch (error: PackageManager.NameNotFoundException) {
+                    Log.w("OrbitQuest", "Verzi aplikace $packageName se nepodařilo načíst.", error)
+                    null
+                }
+                apps.put(JSONObject()
+                    .put("package_name", packageName)
+                    .put("label", label)
+                    .put("version_name", versionName)
+                    .put("is_system", applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM != 0)
+                    .put("icon_base64", readAppIcon(applicationInfo)))
+            }
+
+            installedApps = apps
+            apps
+        } catch (error: Exception) {
+            Log.w("OrbitQuest", "Seznam nainstalovaných aplikací se nepodařilo načíst.", error)
+            JSONArray().also { installedApps = it }
+        }
+    }
+
+    private fun readAppIcon(applicationInfo: android.content.pm.ApplicationInfo): String? {
+        return try {
+            val drawable = applicationInfo.loadIcon(packageManager)
+            val size = 96
+            val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(bitmap)
+            drawable.setBounds(0, 0, size, size)
+            drawable.draw(canvas)
+            ByteArrayOutputStream().use { output ->
+                bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)
+                Base64.encodeToString(output.toByteArray(), Base64.NO_WRAP)
+            }
+        } catch (error: Exception) {
+            Log.w("OrbitQuest", "Ikonu aplikace ${applicationInfo.packageName} se nepodařilo načíst.", error)
+            null
         }
     }
 

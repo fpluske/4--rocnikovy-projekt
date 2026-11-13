@@ -38,7 +38,8 @@ Backend při startu vytvoří následující tabulky. Prototyp zatím používá
 migracemi.
 
 - **`devices`** – registrované headsety, sériové číslo, model, stav, baterie,
-  firmware, IP adresa, aktuální aplikace a poslední kontakt.
+  firmware, IP adresa, aktuální aplikace, seznam nainstalovaných aplikací
+  a poslední kontakt.
 - **`commands`** – fronta příkazů pro zařízení (`restart`, `shutdown`, `lock`,
   `unlock`, `update`) a jejich životní cyklus
   (`queued` → `sent` → `acknowledged` → `completed` nebo `failed`).
@@ -48,7 +49,8 @@ migracemi.
 - **`pairing_requests`** – krátkodobé discovery žádosti s nonce, hashí PINu,
   expirací a stavem (`pending`, `confirmed`, `expired`, `rejected`).
 
-Příkazy **Uzamknout** a **Odemknout** používají Android Lock Task (kiosk) režim.
+Příkaz **Spustit** u uživatelské aplikace odešle její package name agentovi,
+který ji otevře pomocí launcher intentu. Příkazy **Uzamknout** a **Odemknout** používají Android Lock Task (kiosk) režim.
 V tomto režimu uživatel nemůže opustit agentovou aplikaci ani spouštět jiné
 aplikace; odemknutí probíhá pouze příkazem z webové administrace. Pro jeho
 funkčnost musí být agent při nasazení provisionován jako Device Owner. Příkaz
@@ -107,7 +109,9 @@ Při prvním spuštění si aplikace zapamatuje URL backendu a ID párovací ž�
 Po potvrzení PINu ve webu uloží stav jako spárovaný. Při dalších spuštěních se
 automaticky připojí k uloženému backendu bez nového párování. Spárovaný Quest
 agent posílá heartbeat každých deset sekund a přímo v aplikaci zobrazuje, zda
-server odpověděl. Zařízení je po úspěšném heartbeatu
+server odpověděl. Heartbeat obsahuje také seznam všech aplikací nainstalovaných
+v headsetu; dashboard ho zobrazí v nabídce **Aplikace** u každého zařízení.
+Zařízení je po úspěšném heartbeatu
 označeno jako `online`; pokud backend neobdrží heartbeat déle než třicet sekund,
 dashboard jej při dalším načtení označí jako `offline`.
 Dashboard zobrazuje aktuální verzi Horizon OS a stav čekající systémové

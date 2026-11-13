@@ -36,6 +36,10 @@ function BatteryIndicators({ device }) {
   </div>;
 }
 
+function InstalledAppsButton({ apps, onClick }) {
+  return <button className="apps-button" onClick={onClick}>Aplikace ({apps.length})</button>;
+}
+
 function isUpdateAvailable(currentVersion, latestVersion) {
   if (!currentVersion || !latestVersion) return false;
   const current = currentVersion.split(".").map((part) => Number.parseInt(part, 10) || 0);
@@ -69,6 +73,7 @@ function Dashboard({ user, onLogout }) {
   const [loading, setLoading] = useState(true);
   const [serverStatus, setServerStatus] = useState("unknown");
   const [liveDevices, setLiveDevices] = useState([]);
+  const [appsDevice, setAppsDevice] = useState(null);
   const [selectedLiveDeviceIds, setSelectedLiveDeviceIds] = useState([]);
   const [expandedDeviceIds, setExpandedDeviceIds] = useState([]);
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem("orbit-theme") === "dark");
@@ -120,11 +125,16 @@ function Dashboard({ user, onLogout }) {
     } catch (error) { setMessage(error.message); }
   };
 
-  const sendCommand = async (device, type) => {
+  const sendCommand = async (device, type, payload = undefined) => {
     try {
-      await request(`/api/devices/${device.id}/commands`, { method: "POST", body: JSON.stringify({ type }) });
-      setMessage(`Příkaz „${type}“ byl zařazen do fronty.`);
-    } catch (error) { setMessage(error.message); }
+      await request(`/api/devices/${device.id}/commands`, { method: "POST", body: JSON.stringify({ type, ...(payload ? { payload } : {}) }) });
+      setMessage(type === "launch_app" ? "Spuštění aplikace bylo zařazeno do fronty." : `Příkaz „${type}“ byl zařazen do fronty.`);
+      return true;
+    } catch (error) { setMessage(error.message); return false; }
+  };
+
+  const launchApp = async (device, app) => {
+    if (await sendCommand(device, "launch_app", { package_name: app.package_name })) setAppsDevice(null);
   };
 
   const removeDevice = async (device) => {
@@ -223,6 +233,7 @@ function Dashboard({ user, onLogout }) {
                 <p className="muted">{device.model} · {device.serial_number}</p>
                 <div className="app-status-row">
                   <div className="current-app"><span className="app-logo" aria-hidden="true">O</span><span><span className="current-app-label">Aktuální aplikace</span><strong>{device.current_app || "Nezjištěna"}</strong></span></div>
+                  <InstalledAppsButton apps={device.installed_apps || []} onClick={() => setAppsDevice(device)} />
                   <BatteryIndicators device={device} />
                 </div>
               </div>
@@ -247,6 +258,7 @@ function Dashboard({ user, onLogout }) {
       })}</div>}</section>
     </section>
     {liveDevices.length > 0 && <LiveViewGallery devices={liveDevices} onClose={closeLiveView} onCloseAll={() => setLiveDevices([])} />}
+    {appsDevice && <InstalledAppsModal device={appsDevice} onClose={() => setAppsDevice(null)} onLaunch={(app) => launchApp(appsDevice, app)} />}
     </>}
   </main>;
 }
@@ -277,6 +289,34 @@ function UserManagement({ setMessage }) {
 
 function LiveViewGallery({ devices, onClose, onCloseAll }) {
   return <div className="live-backdrop"><section className="live-modal"><div className="section-heading"><div><p className="eyebrow">ŽIVÉ PŘENOSY</p><h2>{devices.length} {devices.length === 1 ? "headset" : "headsety"} současně</h2></div><button className="close-button" onClick={onCloseAll} aria-label="Zavřít všechny přenosy">×</button></div><div className="live-grid">{devices.map((device) => <LiveView key={device.id} device={device} onClose={() => onClose(device.id)} />)}</div></section></div>;
+}
+
+function InstalledAppsModal({ device, onClose, onLaunch }) {
+  const [showSystemApps, setShowSystemApps] = useState(false);
+  const [search, setSearch] = useState("");
+  const apps = device.installed_apps || [];
+  const visibleApps = apps.filter((app) => {
+    const matchesFilter = showSystemApps ? app.is_system : !app.is_system;
+    const query = search.trim().toLocaleLowerCase();
+    return matchesFilter && (!query || `${app.label} ${app.package_name}`.toLocaleLowerCase().includes(query));
+  });
+  return <div className="live-backdrop"><section className="live-modal apps-modal">
+    <div className="section-heading">
+      <div><p className="eyebrow">Nainstalované aplikace</p><h2>{device.name}</h2></div>
+      <button className="close-button" onClick={onClose} aria-label="Zavřít aplikace">×</button>
+    </div>
+    <div className="apps-filters">
+      <input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Hledat aplikaci..." aria-label="Hledat aplikaci" />
+      <label className="system-apps-toggle"><input type="checkbox" checked={showSystemApps} onChange={(event) => setShowSystemApps(event.target.checked)} /> Zobrazit systémové aplikace ({apps.filter((app) => app.is_system).length})</label>
+    </div>
+    {visibleApps.length === 0 ? <div className="empty"><p>{apps.length === 0 ? "Seznam aplikací zatím není k dispozici." : "Filtru neodpovídá žádná aplikace."}</p></div> : <div className="apps-grid">
+      {visibleApps.map((app) => <article className="app-card" key={app.package_name}>
+        {app.icon_base64 ? <img src={`data:image/png;base64,${app.icon_base64}`} alt="" /> : <span className="app-card-placeholder" aria-hidden="true">O</span>}
+        <div className="app-card-info"><h3>{app.label}</h3><p>{app.package_name}</p><small>{app.is_system ? "Systémová aplikace" : "Uživatelská aplikace"}{app.version_name && ` · ${app.version_name}`}</small></div>
+        {!app.is_system && <button className="app-launch-button" onClick={() => onLaunch(app)}>Spustit</button>}
+      </article>)}
+    </div>}
+  </section></div>;
 }
 
 function LiveView({ device, onClose }) {

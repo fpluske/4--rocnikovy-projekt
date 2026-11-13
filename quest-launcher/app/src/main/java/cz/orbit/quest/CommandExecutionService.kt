@@ -56,6 +56,7 @@ class CommandExecutionService : Service() {
                         dispatchKioskCommand(MainActivity.ACTION_UNLOCK, baseUrl, deviceId, commandId)
                     }
                 }
+                "launch_app" -> launchApp(baseUrl, deviceId, commandId, command)
                 "shutdown" -> updateCommand(
                     baseUrl, deviceId, commandId, "failed",
                     "Android neposkytuje aplikaci API pro vypnutí zařízení; použijte uzamčení.",
@@ -66,6 +67,25 @@ class CommandExecutionService : Service() {
             Log.w("OrbitQuest", "Příkaz se nepodařilo vykonat.", error)
             updateCommand(baseUrl, deviceId, commandId, "failed", error.message ?: "Neznámá chyba.")
         }
+    }
+
+    private fun launchApp(baseUrl: String, deviceId: String, commandId: String, command: JSONObject) {
+        val packageName = command.optJSONObject("payload")?.optString("package_name").orEmpty()
+        if (packageName.isBlank()) {
+            updateCommand(baseUrl, deviceId, commandId, "failed", "Příkaz neobsahuje package name aplikace.")
+            return
+        }
+        val applicationInfo = packageManager.getApplicationInfo(packageName, 0)
+        if (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM != 0) {
+            updateCommand(baseUrl, deviceId, commandId, "failed", "Systémovou aplikaci nelze spustit z tohoto tlačítka.")
+            return
+        }
+        val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
+            ?: throw IllegalArgumentException("Aplikace nemá dostupnou launcher aktivitu.")
+        if (!updateCommand(baseUrl, deviceId, commandId, "acknowledged", null)) return
+        launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        startActivity(launchIntent)
+        updateCommand(baseUrl, deviceId, commandId, "completed", null)
     }
 
     private fun dispatchKioskCommand(action: String, baseUrl: String, deviceId: String, commandId: String) {

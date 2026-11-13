@@ -47,6 +47,14 @@ class DeviceCreate(BaseModel):
     model: str = Field(default="Meta Quest 2", max_length=80)
 
 
+class InstalledApp(BaseModel):
+    package_name: str = Field(min_length=1, max_length=300)
+    label: str = Field(min_length=1, max_length=300)
+    version_name: str | None = Field(default=None, max_length=200)
+    is_system: bool = False
+    icon_base64: str | None = Field(default=None, max_length=500_000)
+
+
 class DeviceRead(DeviceCreate):
     id: str
     status: DeviceStatus
@@ -59,6 +67,7 @@ class DeviceRead(DeviceCreate):
     horizon_os_update_pending: bool
     ip_address: str | None
     current_app: str | None
+    installed_apps: list[InstalledApp] = Field(default_factory=list)
     last_seen_at: datetime | None
     created_at: datetime
     updated_at: datetime
@@ -76,6 +85,7 @@ class DeviceHeartbeat(BaseModel):
     horizon_os_version: str | None = Field(default=None, max_length=120)
     horizon_os_update_pending: bool = False
     current_app: str | None = Field(default=None, max_length=200)
+    installed_apps: list[InstalledApp] = Field(default_factory=list)
 
 
 class UpdatePackageRead(BaseModel):
