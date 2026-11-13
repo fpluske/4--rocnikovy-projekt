@@ -51,6 +51,7 @@ class DeviceRead(DeviceCreate):
     id: str
     status: DeviceStatus
     battery_percent: int | None
+    is_charging: bool | None
     left_controller_battery_percent: int | None
     right_controller_battery_percent: int | None
     firmware_version: str | None
@@ -68,6 +69,7 @@ class DeviceHeartbeat(BaseModel):
     serial_number: str = Field(min_length=1, max_length=120)
     status: DeviceStatus = DeviceStatus.online
     battery_percent: int | None = Field(default=None, ge=0, le=100)
+    is_charging: bool | None = None
     left_controller_battery_percent: int | None = Field(default=None, ge=0, le=100)
     right_controller_battery_percent: int | None = Field(default=None, ge=0, le=100)
     firmware_version: str | None = Field(default=None, max_length=80)

@@ -73,15 +73,17 @@ button:hover { filter: brightness(.96); }
 .live-checkbox input { width: 16px; height: 16px; margin: 0; accent-color: #218c83; }
 .live-checkbox input:disabled { cursor: not-allowed; }
 .current-app { display: inline-flex; align-items: center; gap: 8px; margin: 12px 0 2px; }
+.app-status-row { display: flex; align-items: center; flex-wrap: wrap; gap: 24px; }
 .app-logo { display: grid; width: 28px; height: 28px; place-items: center; color: #fff; background: linear-gradient(135deg, #218c83, #155b68); border-radius: 8px; font-size: .85rem; font-weight: 850; box-shadow: 0 3px 8px #155b6833; }
 .current-app > span:last-child { display: grid; gap: 1px; }
 .current-app-label { color: var(--muted); font-size: .7rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
 .current-app strong { font-size: .85rem; }
-.battery-indicators { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 14px; }
+.battery-indicators { display: flex; flex-wrap: wrap; margin-top: 12px; }
 .battery-indicator { display: inline-flex; min-width: 116px; align-items: center; gap: 8px; }
 .battery-icon { position: relative; display: inline-flex; width: 30px; height: 15px; align-items: center; padding: 2px; border: 2px solid var(--muted); border-radius: 4px; }
 .battery-icon::after { position: absolute; top: 3px; right: -5px; width: 3px; height: 5px; background: var(--muted); border-radius: 0 2px 2px 0; content: ""; }
 .battery-icon span { display: block; height: 100%; background: #218c83; border-radius: 1px; }
+.charging-icon { position: absolute; top: 50%; left: 50%; z-index: 1; width: 11px; height: 11px; fill: #fff; transform: translate(-50%, -50%); }
 .battery-info { display: grid; gap: 1px; }
 .battery-info strong { font-size: .76rem; }
 .battery-value { color: #218c83; font-size: .78rem; font-weight: 800; }
@@ -133,6 +135,7 @@ button:hover { filter: brightness(.96); }
   .layout { grid-template-columns: 1fr; }
   .actions { width: 100%; justify-content: flex-start; }
   .device-info { width: 100%; }
+  .app-status-row { align-items: flex-start; flex-direction: column; gap: 0; }
   .device-summary { width: 100%; align-items: flex-start; flex-direction: column; }
   .device-details { margin-left: 0; }
   .live-actions { flex-wrap: wrap; justify-content: flex-end; }

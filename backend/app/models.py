@@ -74,6 +74,7 @@ class Device(Base):
     model: Mapped[str] = mapped_column(String(80), nullable=False, default="Meta Quest 2")
     status: Mapped[DeviceStatus] = mapped_column(String(20), nullable=False, default=DeviceStatus.unknown)
     battery_percent: Mapped[int | None] = mapped_column(Integer)
+    is_charging: Mapped[bool | None] = mapped_column(Boolean)
     left_controller_battery_percent: Mapped[int | None] = mapped_column(Integer)
     right_controller_battery_percent: Mapped[int | None] = mapped_column(Integer)
     firmware_version: Mapped[str | None] = mapped_column(String(80))

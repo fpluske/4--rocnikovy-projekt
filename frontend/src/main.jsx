@@ -17,20 +17,22 @@ const connectionLabels = {
   unknown: "Ověřuji server",
 };
 
-function BatteryIndicator({ label, percent }) {
+function BatteryIndicator({ label, percent, isCharging }) {
   const level = percent === null || percent === undefined ? "unknown" : percent <= 30 ? "low" : percent <= 60 ? "medium" : "high";
   const fillWidth = percent === null || percent === undefined ? 0 : Math.max(0, Math.min(100, percent));
-  return <div className="battery-indicator" title={`${label}: ${percent === null || percent === undefined ? "nezjištěno" : `${percent} %`}`}>
-    <span className="battery-icon" aria-hidden="true"><span style={{ width: `${fillWidth}%` }} /></span>
+  const chargingLabel = isCharging === null || isCharging === undefined ? "stav nabíjení nezjištěn" : isCharging ? "nabíjí se" : "nenabíjí se";
+  return <div className="battery-indicator" title={`${label}: ${percent === null || percent === undefined ? "nezjištěno" : `${percent} %`}, ${chargingLabel}`}>
+    <span className={`battery-icon ${isCharging ? "charging" : ""}`} aria-hidden="true">
+      <span style={{ width: `${fillWidth}%` }} />
+      {isCharging && <svg className="charging-icon" viewBox="0 0 24 24" focusable="false"><path d="M13.2 2 4.8 13h5.7L9.7 22 19.2 10.1h-5.8L13.2 2Z" /></svg>}
+    </span>
     <span className="battery-info"><strong>{label}</strong><span className={`battery-value ${level}`}>{percent === null || percent === undefined ? "—" : `${percent} %`}</span></span>
   </div>;
 }
 
 function BatteryIndicators({ device }) {
-  return <div className="battery-indicators" aria-label="Stav baterií">
-    <BatteryIndicator label="Headset" percent={device.battery_percent} />
-    <BatteryIndicator label="Levý ovladač" percent={device.left_controller_battery_percent} />
-    <BatteryIndicator label="Pravý ovladač" percent={device.right_controller_battery_percent} />
+  return <div className="battery-indicators" aria-label="Stav baterie headsetu">
+    <BatteryIndicator label="Headset" percent={device.battery_percent} isCharging={device.is_charging} />
   </div>;
 }
 
@@ -219,8 +221,10 @@ function Dashboard({ user, onLogout }) {
                   <span className={`status ${device.status}`}>{statusLabels[device.status] || device.status}</span>
                 </div>
                 <p className="muted">{device.model} · {device.serial_number}</p>
-                <div className="current-app"><span className="app-logo" aria-hidden="true">O</span><span><span className="current-app-label">Aktuální aplikace</span><strong>{device.current_app || "Nezjištěna"}</strong></span></div>
-                <BatteryIndicators device={device} />
+                <div className="app-status-row">
+                  <div className="current-app"><span className="app-logo" aria-hidden="true">O</span><span><span className="current-app-label">Aktuální aplikace</span><strong>{device.current_app || "Nezjištěna"}</strong></span></div>
+                  <BatteryIndicators device={device} />
+                </div>
               </div>
             </div>
             <div className="actions">

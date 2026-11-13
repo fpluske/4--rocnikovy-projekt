@@ -4,12 +4,16 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
+import android.app.usage.UsageEvents
+import android.app.usage.UsageStatsManager
 import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.BroadcastReceiver
 import android.content.Context
+import android.app.ActivityManager
+import android.os.BatteryManager
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
@@ -35,6 +39,16 @@ class OrbitAgentService : Service() {
         private const val PREFS = "orbit_quest"
         private const val PAIRED_BACKEND_URL = "paired_backend_url"
         private const val PAIRED_DEVICE_ID = "paired_device_id"
+        private val MENU_PACKAGES = setOf(
+            "com.oculus.vrshell",
+            "com.meta.systemui",
+            "com.oculus.systemux",
+        )
+        private val HOME_PACKAGES = setOf(
+            "com.oculus.igvr",
+            "com.oculus.home",
+            "com.meta.home",
+        )
     }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -117,9 +131,14 @@ class OrbitAgentService : Service() {
                     setRequestProperty("Content-Type", "application/json")
                 }
                 connection.outputStream.use {
+                    val battery = readBatteryLevels()
                     it.write(JSONObject()
                         .put("serial_number", serialNumber)
                         .put("status", deviceStatus.get())
+                        .put("battery_percent", battery.headset)
+                        .put("is_charging", battery.isCharging)
+                        .put("left_controller_battery_percent", battery.leftController)
+                        .put("right_controller_battery_percent", battery.rightController)
                         .put("firmware_version", appVersion)
                         .put("horizon_os_version", "${android.os.Build.DISPLAY} (${android.os.Build.VERSION.INCREMENTAL})")
                         .put(
@@ -128,7 +147,7 @@ class OrbitAgentService : Service() {
                                 ComponentName(this@OrbitAgentService, OrbitDeviceAdminReceiver::class.java),
                             ) != null,
                         )
-                        .put("current_app", "Orbit Quest")
+                        .put("current_app", readCurrentApp())
                         .toString()
                         .toByteArray())
                 }
@@ -140,6 +159,95 @@ class OrbitAgentService : Service() {
                 heartbeatInFlight.set(false)
             }
         }.start()
+    }
+
+    private data class BatteryLevels(
+        val headset: Int?,
+        val isCharging: Boolean?,
+        val leftController: Int?,
+        val rightController: Int?,
+    )
+
+    private fun readBatteryLevels(): BatteryLevels {
+        val batteryManager = getSystemService(BatteryManager::class.java)
+        val headsetLevel = batteryManager?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+            ?.takeIf { it in 0..100 }
+        val batteryStatus = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+            ?.getIntExtra(BatteryManager.EXTRA_STATUS, -1)
+        val isCharging = when (batteryStatus) {
+            BatteryManager.BATTERY_STATUS_CHARGING -> true
+            BatteryManager.BATTERY_STATUS_DISCHARGING,
+            BatteryManager.BATTERY_STATUS_NOT_CHARGING,
+            BatteryManager.BATTERY_STATUS_FULL -> false
+            else -> null
+        }
+
+        val leftController = readControllerBatteryLevel(1)
+        val rightController = readControllerBatteryLevel(0)
+        return BatteryLevels(headsetLevel, isCharging, leftController, rightController)
+    }
+
+    private fun readCurrentApp(): String {
+        val packageName = readForegroundPackage() ?: return "Home"
+        return when {
+            packageName in MENU_PACKAGES -> "Menu"
+            packageName in HOME_PACKAGES -> "Home"
+            else -> try {
+                packageManager.getApplicationLabel(
+                    packageManager.getApplicationInfo(packageName, 0),
+                ).toString()
+            } catch (error: android.content.pm.PackageManager.NameNotFoundException) {
+                packageName
+            }
+        }
+    }
+
+    private fun readForegroundPackage(): String? {
+        return try {
+            getSystemService(ActivityManager::class.java)
+                ?.getRunningTasks(1)
+                ?.firstOrNull()
+                ?.topActivity
+                ?.packageName
+                ?: readForegroundPackageFromUsageStats()
+        } catch (error: SecurityException) {
+            Log.w("OrbitQuest", "Aktivní aplikaci nelze zjistit přes ActivityManager.", error)
+            readForegroundPackageFromUsageStats()
+        }
+    }
+
+    private fun readForegroundPackageFromUsageStats(): String? {
+        val usageStatsManager = getSystemService(UsageStatsManager::class.java) ?: return null
+        val endTime = System.currentTimeMillis()
+        val events = usageStatsManager.queryEvents(endTime - 60_000L, endTime)
+        val event = UsageEvents.Event()
+        var foregroundPackage: String? = null
+        while (events.hasNextEvent()) {
+            events.getNextEvent(event)
+            if (event.eventType == UsageEvents.Event.MOVE_TO_FOREGROUND) {
+                foregroundPackage = event.packageName
+            }
+        }
+        return foregroundPackage
+    }
+
+    private fun readControllerBatteryLevel(controllerType: Int): Int? {
+        return try {
+            val controllersManager = getSystemService("controllers_manager") ?: return null
+            val controllerInfo = controllersManager.javaClass
+                .getMethod("getPairedDeviceInfo", Int::class.javaPrimitiveType)
+                .invoke(controllersManager, controllerType)
+                ?: return null
+            controllerInfo.javaClass.getMethod("getBatteryLevel").invoke(controllerInfo)
+                .let { it as? Int }
+                ?.takeIf { it in 0..100 }
+        } catch (error: ReflectiveOperationException) {
+            Log.w("OrbitQuest", "Baterii ovladačů se nepodařilo načíst.", error)
+            null
+        } catch (error: SecurityException) {
+            Log.w("OrbitQuest", "Přístup k baterii ovladačů byl odmítnut.", error)
+            null
+        }
     }
 
     private fun pollCommands() {

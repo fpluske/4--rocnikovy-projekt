@@ -45,6 +45,10 @@ def ensure_device_status_columns() -> None:
             connection.execute(text(
                 "ALTER TABLE devices ADD COLUMN right_controller_battery_percent INTEGER"
             ))
+        if "is_charging" not in columns:
+            connection.execute(text(
+                "ALTER TABLE devices ADD COLUMN is_charging BOOLEAN"
+            ))
 
 
 ensure_device_status_columns()
@@ -496,6 +500,7 @@ def heartbeat(
     device.status = data.status
     device.last_seen_at = utc_now()
     device.battery_percent = data.battery_percent
+    device.is_charging = data.is_charging
     device.left_controller_battery_percent = data.left_controller_battery_percent
     device.right_controller_battery_percent = data.right_controller_battery_percent
     device.firmware_version = data.firmware_version
