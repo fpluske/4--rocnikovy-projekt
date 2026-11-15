@@ -18,6 +18,7 @@ class DeviceStatus(StrEnum):
 class CommandType(StrEnum):
     restart = "restart"
     shutdown = "shutdown"
+    force_stop = "force_stop"
     lock = "lock"
     unlock = "unlock"
     update = "update"
@@ -83,6 +84,7 @@ class Device(Base):
     horizon_os_update_pending: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     ip_address: Mapped[str | None] = mapped_column(String(45))
     current_app: Mapped[str | None] = mapped_column(String(200))
+    current_app_package: Mapped[str | None] = mapped_column(String(300))
     installed_apps: Mapped[list[dict] | None] = mapped_column(JSON, nullable=False, default=list)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

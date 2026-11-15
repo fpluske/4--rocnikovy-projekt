@@ -74,6 +74,8 @@ function Dashboard({ user, onLogout }) {
   const [serverStatus, setServerStatus] = useState("unknown");
   const [liveDevices, setLiveDevices] = useState([]);
   const [appsDevice, setAppsDevice] = useState(null);
+  const [appsDevices, setAppsDevices] = useState(null);
+  const [lockedDeviceIds, setLockedDeviceIds] = useState([]);
   const [selectedLiveDeviceIds, setSelectedLiveDeviceIds] = useState([]);
   const [expandedDeviceIds, setExpandedDeviceIds] = useState([]);
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem("orbit-theme") === "dark");
@@ -128,7 +130,12 @@ function Dashboard({ user, onLogout }) {
   const sendCommand = async (device, type, payload = undefined) => {
     try {
       await request(`/api/devices/${device.id}/commands`, { method: "POST", body: JSON.stringify({ type, ...(payload ? { payload } : {}) }) });
-      setMessage(type === "launch_app" ? "Spuštění aplikace bylo zařazeno do fronty." : `Příkaz „${type}“ byl zařazen do fronty.`);
+      const message = type === "launch_app"
+        ? "Spuštění aplikace bylo zařazeno do fronty."
+        : type === "force_stop"
+          ? "Vynucené ukončení aplikace bylo zařazeno do fronty."
+          : `Příkaz „${type}“ byl zařazen do fronty.`;
+      setMessage(message);
       return true;
     } catch (error) { setMessage(error.message); return false; }
   };
@@ -137,12 +144,44 @@ function Dashboard({ user, onLogout }) {
     if (await sendCommand(device, "launch_app", { package_name: app.package_name })) setAppsDevice(null);
   };
 
+  const forceStopApp = (device) => {
+    const app = (device.installed_apps || []).find((installedApp) => installedApp.label === device.current_app);
+    const packageName = device.current_app_package || app?.package_name || (device.current_app?.includes(".") ? device.current_app : undefined);
+    sendCommand(device, "force_stop", packageName ? { package_name: packageName } : undefined);
+  };
+
+  const toggleDeviceLock = async (device) => {
+    const isLocked = lockedDeviceIds.includes(device.id);
+    if (await sendCommand(device, isLocked ? "unlock" : "lock")) {
+      setLockedDeviceIds((current) => isLocked
+        ? current.filter((id) => id !== device.id)
+        : [...current, device.id]);
+    }
+  };
+
+  const launchAppOnSelectedDevices = async (app) => {
+    if (!appsDevices) return;
+    const results = await Promise.allSettled(appsDevices.map((device) => request(`/api/devices/${device.id}/commands`, {
+      method: "POST",
+      body: JSON.stringify({ type: "launch_app", payload: { package_name: app.package_name } }),
+    })));
+    const successful = results.filter((result) => result.status === "fulfilled").length;
+    const failed = results.length - successful;
+    if (failed === 0) {
+      setMessage(`Spuštění aplikace bylo zařazeno do fronty na ${successful} zařízeních.`);
+      setAppsDevices(null);
+    } else {
+      setMessage(`Spuštění aplikace bylo zařazeno na ${successful} zařízeních, ${failed} zařízení příkaz odmítlo.`);
+    }
+  };
+
   const removeDevice = async (device) => {
     if (!window.confirm(`Opravdu odstranit zařízení „${device.name}“?`)) return;
     try {
       await request(`/api/devices/${device.id}`, { method: "DELETE" });
       setSelectedLiveDeviceIds((current) => current.filter((id) => id !== device.id));
       setExpandedDeviceIds((current) => current.filter((id) => id !== device.id));
+      setLockedDeviceIds((current) => current.filter((id) => id !== device.id));
       setMessage("Zařízení bylo odstraněno.");
       await loadDevices();
     } catch (error) { setMessage(error.message); }
@@ -183,8 +222,14 @@ function Dashboard({ user, onLogout }) {
     devices.filter((device) => selectedLiveDeviceIds.includes(device.id) && device.status === "online").forEach(openLiveView);
   };
 
+  const openSelectedApps = () => {
+    const selectedDevices = devices.filter((device) => selectedLiveDeviceIds.includes(device.id));
+    if (selectedDevices.length > 0) setAppsDevices(selectedDevices);
+  };
+
   const onlineDevices = devices.filter((device) => device.status === "online");
   const allOnlineSelected = onlineDevices.length > 0 && onlineDevices.every((device) => selectedLiveDeviceIds.includes(device.id));
+  const selectedDevices = devices.filter((device) => selectedLiveDeviceIds.includes(device.id));
   const toggleAllOnlineSelection = () => {
     setSelectedLiveDeviceIds((current) => allOnlineSelected
       ? current.filter((id) => !onlineDevices.some((device) => device.id === id))
@@ -214,7 +259,7 @@ function Dashboard({ user, onLogout }) {
     {pairingOpen && user.role === "admin" && <section className="card pairing-form-card"><div className="section-heading"><div><p className="eyebrow">NOVÉ ZAŘÍZENÍ</p><h2>Spustit párování</h2></div><button className="close-button" onClick={() => setPairingOpen(false)} aria-label="Zavřít">×</button></div><p className="muted">V prototypu zde simulujete discovery packet z aplikace headsetu.</p><form className="pairing-form" onSubmit={discoverDevice}><label>Název headsetu<input required autoFocus value={pairingForm.name} onChange={(e) => setPairingForm({ ...pairingForm, name: e.target.value })} placeholder="Např. Quest učebna 1" /></label><label>Sériové číslo<input required value={pairingForm.serial_number} onChange={(e) => setPairingForm({ ...pairingForm, serial_number: e.target.value })} /></label><label>PIN z headsetu<input required inputMode="numeric" pattern="[0-9]{4}" maxLength="4" value={pairingForm.pin} onChange={(e) => setPairingForm({ ...pairingForm, pin: e.target.value.replace(/\D/g, "") })} placeholder="4 číslice" /></label><div className="form-actions"><button type="button" onClick={() => setPairingOpen(false)}>Zrušit</button><button className="primary">Odeslat discovery</button></div></form></section>}
     {pairings.length > 0 && user.role === "admin" && <section className="card pairing-card"><div className="section-heading"><h2>Čekající párování</h2><span>{pairings.length} nové</span></div>{pairings.map((pairing) => <article className="device" key={pairing.id}><div><h3>{pairing.name}</h3><p className="muted">{pairing.model} · {pairing.serial_number}</p><span className="status unknown">čeká na potvrzení</span></div><div className="pairing-actions"><button className="primary" onClick={() => confirmPairing(pairing)}>Potvrdit PINem</button><button className="danger" onClick={() => rejectPairing(pairing)}>Odmítnout</button></div></article>)}</section>}
     <section className="layout">
-      <section className="card devices-card"><div className="section-heading"><div><h2>Zařízení</h2><span>{devices.length} celkem</span></div>{devices.length > 0 && <div className="live-selection-actions">{user.role === "admin" && <button className="primary pairing-button" onClick={() => setPairingOpen(true)}>Párovat zařízení</button>}<button className="icon-button secondary" onClick={loadDevices} aria-label="Obnovit zařízení" title="Obnovit">↻</button><button className="secondary" onClick={toggleAllOnlineSelection} disabled={onlineDevices.length === 0}>{allOnlineSelected ? "Zrušit výběr" : "Vybrat online"}</button><button className="primary" onClick={openSelectedLiveViews} disabled={selectedLiveDeviceIds.length === 0}>Sledovat vybrané ({selectedLiveDeviceIds.length})</button></div>}</div>{loading ? <p className="muted">Načítám...</p> : devices.length === 0 ? <div className="empty"><p>Zatím není spárován žádný headset.</p>{user.role === "admin" && <button className="primary" onClick={() => setPairingOpen(true)}>Párovat první zařízení</button>}</div> : <div className="device-list">{devices.map((device) => {
+      <section className="card devices-card"><div className="section-heading"><div><h2>Zařízení</h2><span>{devices.length} celkem</span></div>{devices.length > 0 && <div className="live-selection-actions"><button className="primary pairing-button" onClick={openSelectedApps} disabled={selectedDevices.length === 0}>Aplikace ({selectedDevices.length})</button><button className="icon-button secondary" onClick={loadDevices} aria-label="Obnovit zařízení" title="Obnovit">↻</button><button className="secondary" onClick={toggleAllOnlineSelection} disabled={onlineDevices.length === 0}>{allOnlineSelected ? "Zrušit výběr" : "Vybrat online"}</button><button className="primary" onClick={openSelectedLiveViews} disabled={selectedLiveDeviceIds.length === 0}>Sledovat vybrané ({selectedLiveDeviceIds.length})</button></div>}</div>{loading ? <p className="muted">Načítám...</p> : devices.length === 0 ? <div className="empty"><p>Zatím není spárován žádný headset.</p>{user.role === "admin" && <button className="primary" onClick={() => setPairingOpen(true)}>Párovat první zařízení</button>}</div> : <div className="device-list">{devices.map((device) => {
         const isLive = liveDevices.some((liveDevice) => liveDevice.id === device.id);
         const isSelected = selectedLiveDeviceIds.includes(device.id);
         const isExpanded = expandedDeviceIds.includes(device.id);
@@ -232,17 +277,23 @@ function Dashboard({ user, onLogout }) {
                 </div>
                 <p className="muted">{device.model} · {device.serial_number}</p>
                 <div className="app-status-row">
-                  <div className="current-app"><span className="app-logo" aria-hidden="true">O</span><span><span className="current-app-label">Aktuální aplikace</span><strong>{device.current_app || "Nezjištěna"}</strong></span></div>
-                  <InstalledAppsButton apps={device.installed_apps || []} onClick={() => setAppsDevice(device)} />
+                  {(() => {
+                    const currentApp = (device.installed_apps || []).find((app) => app.package_name === device.current_app_package);
+                    return <div className="current-app">
+                      {currentApp?.icon_base64 ? <img className="app-logo" src={`data:image/png;base64,${currentApp.icon_base64}`} alt="" /> : <span className="app-logo" aria-hidden="true">O</span>}
+                      <span><span className="current-app-label">Aktuální aplikace</span><strong>{currentApp?.label || device.current_app || "Nezjištěna"}</strong></span>
+                    </div>;
+                  })()}
+                  <button className="force-stop-button" disabled={device.status !== "online" || !device.current_app || device.current_app === "Home" || device.current_app === "Menu"} onClick={() => forceStopApp(device)}>Vynutit ukončení</button>
                   <BatteryIndicators device={device} />
                 </div>
               </div>
             </div>
             <div className="actions">
               <button className="live-button" disabled={device.status !== "online" || isLive} onClick={() => openLiveView(device)}>{isLive ? "Sleduji" : "Živě"}</button>
+              <InstalledAppsButton apps={device.installed_apps || []} onClick={() => setAppsDevice(device)} />
               <button onClick={() => sendCommand(device, "restart")}>Restart</button>
-              <button onClick={() => sendCommand(device, "lock")}>Uzamknout</button>
-              <button onClick={() => sendCommand(device, "unlock")}>Odemknout</button>
+              <button onClick={() => toggleDeviceLock(device)}>{lockedDeviceIds.includes(device.id) ? "Odemknout" : "Uzamknout"}</button>
               {user.role === "admin" && <button className="danger" onClick={() => removeDevice(device)}>Odstranit</button>}
               <button className="details-toggle" onClick={() => toggleDeviceDetails(device.id)} aria-expanded={isExpanded} aria-label={`${isExpanded ? "Skrýt" : "Zobrazit"} podrobnosti zařízení ${device.name}`}>
                 <span aria-hidden="true">{isExpanded ? "⌃" : "⌄"}</span>
@@ -259,6 +310,7 @@ function Dashboard({ user, onLogout }) {
     </section>
     {liveDevices.length > 0 && <LiveViewGallery devices={liveDevices} onClose={closeLiveView} onCloseAll={() => setLiveDevices([])} />}
     {appsDevice && <InstalledAppsModal device={appsDevice} onClose={() => setAppsDevice(null)} onLaunch={(app) => launchApp(appsDevice, app)} />}
+    {appsDevices && <CommonInstalledAppsModal devices={appsDevices} onClose={() => setAppsDevices(null)} onLaunch={launchAppOnSelectedDevices} />}
     </>}
   </main>;
 }
@@ -314,6 +366,38 @@ function InstalledAppsModal({ device, onClose, onLaunch }) {
         {app.icon_base64 ? <img src={`data:image/png;base64,${app.icon_base64}`} alt="" /> : <span className="app-card-placeholder" aria-hidden="true">O</span>}
         <div className="app-card-info"><h3>{app.label}</h3><p>{app.package_name}</p><small>{app.is_system ? "Systémová aplikace" : "Uživatelská aplikace"}{app.version_name && ` · ${app.version_name}`}</small></div>
         {!app.is_system && <button className="app-launch-button" onClick={() => onLaunch(app)}>Spustit</button>}
+      </article>)}
+    </div>}
+  </section></div>;
+}
+
+function CommonInstalledAppsModal({ devices, onClose, onLaunch }) {
+  const [search, setSearch] = useState("");
+  const appsByPackage = devices.map((device) => new Map(
+    (device.installed_apps || [])
+      .filter((app) => !app.is_system)
+      .map((app) => [app.package_name, app]),
+  ));
+  const commonApps = [...(appsByPackage[0]?.entries() || [])]
+    .filter(([packageName]) => appsByPackage.every((apps) => apps.has(packageName)))
+    .map(([, app]) => app);
+  const query = search.trim().toLocaleLowerCase();
+  const visibleApps = commonApps.filter((app) => !query || `${app.label} ${app.package_name}`.toLocaleLowerCase().includes(query));
+
+  return <div className="live-backdrop"><section className="live-modal apps-modal">
+    <div className="section-heading">
+      <div><p className="eyebrow">SPOLEČNÉ UŽIVATELSKÉ APLIKACE</p><h2>{devices.length} vybraná zařízení</h2></div>
+      <button className="close-button" onClick={onClose} aria-label="Zavřít aplikace">×</button>
+    </div>
+    <p className="muted">Zobrazeny jsou aplikace nainstalované na všech vybraných zařízeních.</p>
+    <div className="apps-filters">
+      <input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Hledat aplikaci..." aria-label="Hledat aplikaci" />
+    </div>
+    {visibleApps.length === 0 ? <div className="empty"><p>{commonApps.length === 0 ? "Vybraná zařízení nemají společnou uživatelskou aplikaci." : "Filtru neodpovídá žádná aplikace."}</p></div> : <div className="apps-grid">
+      {visibleApps.map((app) => <article className="app-card" key={app.package_name}>
+        {app.icon_base64 ? <img src={`data:image/png;base64,${app.icon_base64}`} alt="" /> : <span className="app-card-placeholder" aria-hidden="true">O</span>}
+        <div className="app-card-info"><h3>{app.label}</h3><p>{app.package_name}</p><small>Uživatelská aplikace{app.version_name && ` · ${app.version_name}`}</small></div>
+        <button className="app-launch-button" onClick={() => onLaunch(app)}>Spustit na všech</button>
       </article>)}
     </div>}
   </section></div>;

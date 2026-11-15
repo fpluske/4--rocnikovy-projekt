@@ -60,7 +60,6 @@ class OrbitAgentService : Service() {
     private val heartbeatInFlight = AtomicBoolean(false)
     private val commandPollInFlight = AtomicBoolean(false)
     private val deviceStatus = AtomicReference("online")
-    private var installedApps: JSONArray? = null
     private val screenStateReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             val status = when (intent.action) {
@@ -138,6 +137,7 @@ class OrbitAgentService : Service() {
                 }
                 connection.outputStream.use {
                     val battery = readBatteryLevels()
+                    val currentApp = readCurrentApp()
                     it.write(JSONObject()
                         .put("serial_number", serialNumber)
                         .put("status", deviceStatus.get())
@@ -153,7 +153,8 @@ class OrbitAgentService : Service() {
                                 ComponentName(this@OrbitAgentService, OrbitDeviceAdminReceiver::class.java),
                             ) != null,
                         )
-                        .put("current_app", readCurrentApp())
+                        .put("current_app", currentApp.label)
+                        .put("current_app_package", currentApp.packageName)
                         .put("installed_apps", readInstalledApps())
                         .toString()
                         .toByteArray())
@@ -194,9 +195,11 @@ class OrbitAgentService : Service() {
         return BatteryLevels(headsetLevel, isCharging, leftController, rightController)
     }
 
-    private fun readCurrentApp(): String {
-        val packageName = readForegroundPackage() ?: return "Home"
-        return when {
+    private data class CurrentApp(val packageName: String?, val label: String)
+
+    private fun readCurrentApp(): CurrentApp {
+        val packageName = readForegroundPackage() ?: return CurrentApp(null, "Home")
+        val label = when {
             packageName in MENU_PACKAGES -> "Menu"
             packageName in HOME_PACKAGES -> "Home"
             else -> try {
@@ -207,10 +210,10 @@ class OrbitAgentService : Service() {
                 packageName
             }
         }
+        return CurrentApp(packageName, label)
     }
 
     private fun readInstalledApps(): JSONArray {
-        installedApps?.let { return it }
         return try {
             val applications = packageManager
                 .getInstalledApplications(PackageManager.GET_META_DATA)
@@ -233,11 +236,10 @@ class OrbitAgentService : Service() {
                     .put("icon_base64", readAppIcon(applicationInfo)))
             }
 
-            installedApps = apps
             apps
         } catch (error: Exception) {
             Log.w("OrbitQuest", "Seznam nainstalovaných aplikací se nepodařilo načíst.", error)
-            JSONArray().also { installedApps = it }
+            JSONArray()
         }
     }
 

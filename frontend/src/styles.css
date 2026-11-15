@@ -75,6 +75,7 @@ button:hover { filter: brightness(.96); }
 .current-app { display: inline-flex; align-items: center; gap: 8px; margin: 12px 0 2px; }
 .app-status-row { display: flex; align-items: center; flex-wrap: wrap; gap: 24px; }
 .app-logo { display: grid; width: 28px; height: 28px; place-items: center; color: #fff; background: linear-gradient(135deg, #218c83, #155b68); border-radius: 8px; font-size: .85rem; font-weight: 850; box-shadow: 0 3px 8px #155b6833; }
+.current-app img.app-logo { object-fit: cover; }
 .current-app > span:last-child { display: grid; gap: 1px; }
 .current-app-label { color: var(--muted); font-size: .7rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
 .current-app strong { font-size: .85rem; }
@@ -106,6 +107,7 @@ button:hover { filter: brightness(.96); }
 .firmware-version strong { color: #9a6b00; }
 .actions { flex-wrap: nowrap; justify-content: flex-end; gap: 7px; }
 .actions button { flex: 0 0 auto; white-space: nowrap; }
+.actions .apps-button { margin: 0; }
 .server-connection { display: inline-flex; width: 34px; height: 34px; align-items: center; justify-content: center; padding: 0; border-radius: 50%; font-size: 1.15rem; font-weight: 900; line-height: 1; white-space: nowrap; }
 .server-connection.online { color: #176b4a; background: #d9f5e7; }
 .server-connection.offline { color: #8a3434; background: #fbe1e1; }

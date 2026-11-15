@@ -1,6 +1,9 @@
 package cz.orbit.quest
 
 import android.app.Service
+import android.app.ActivityManager
+import android.app.usage.UsageEvents
+import android.app.usage.UsageStatsManager
 import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
 import android.content.Intent
@@ -16,6 +19,14 @@ class CommandExecutionService : Service() {
         const val EXTRA_BASE_URL = "base_url"
         const val EXTRA_DEVICE_ID = "device_id"
         const val EXTRA_COMMAND = "command"
+        private val PROTECTED_PACKAGES = setOf(
+            "com.oculus.vrshell",
+            "com.meta.systemui",
+            "com.oculus.systemux",
+            "com.oculus.igvr",
+            "com.oculus.home",
+            "com.meta.home",
+        )
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -57,6 +68,7 @@ class CommandExecutionService : Service() {
                     }
                 }
                 "launch_app" -> launchApp(baseUrl, deviceId, commandId, command)
+                "force_stop" -> forceStopCurrentApp(baseUrl, deviceId, commandId, command)
                 "shutdown" -> updateCommand(
                     baseUrl, deviceId, commandId, "failed",
                     "Android neposkytuje aplikaci API pro vypnutí zařízení; použijte uzamčení.",
@@ -86,6 +98,51 @@ class CommandExecutionService : Service() {
         launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         startActivity(launchIntent)
         updateCommand(baseUrl, deviceId, commandId, "completed", null)
+    }
+
+    private fun forceStopCurrentApp(baseUrl: String, deviceId: String, commandId: String, command: JSONObject) {
+        val requestedPackageName = command.optJSONObject("payload")?.optString("package_name").orEmpty()
+        val packageName = requestedPackageName.ifBlank { readForegroundPackage().orEmpty() }
+        if (packageName.isBlank() || packageName == applicationContext.packageName || packageName in PROTECTED_PACKAGES) {
+            updateCommand(baseUrl, deviceId, commandId, "failed", "Aktivní aplikaci se nepodařilo zjistit.")
+            return
+        }
+        if (!updateCommand(baseUrl, deviceId, commandId, "acknowledged", null)) return
+        getSystemService(ActivityManager::class.java)?.killBackgroundProcesses(packageName)
+        startActivity(Intent(Intent.ACTION_MAIN).apply {
+            addCategory(Intent.CATEGORY_HOME)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        })
+        updateCommand(baseUrl, deviceId, commandId, "completed", null)
+    }
+
+    private fun readForegroundPackage(): String? {
+        return try {
+            getSystemService(ActivityManager::class.java)
+                ?.getRunningTasks(1)
+                ?.firstOrNull()
+                ?.topActivity
+                ?.packageName
+                ?: readForegroundPackageFromUsageStats()
+        } catch (error: SecurityException) {
+            Log.w("OrbitQuest", "Aktivní aplikaci nelze zjistit přes ActivityManager.", error)
+            readForegroundPackageFromUsageStats()
+        }
+    }
+
+    private fun readForegroundPackageFromUsageStats(): String? {
+        val usageStatsManager = getSystemService(UsageStatsManager::class.java) ?: return null
+        val endTime = System.currentTimeMillis()
+        val events = usageStatsManager.queryEvents(endTime - 60_000L, endTime)
+        val event = UsageEvents.Event()
+        var foregroundPackage: String? = null
+        while (events.hasNextEvent()) {
+            events.getNextEvent(event)
+            if (event.eventType == UsageEvents.Event.MOVE_TO_FOREGROUND) {
+                foregroundPackage = event.packageName
+            }
+        }
+        return foregroundPackage
     }
 
     private fun dispatchKioskCommand(action: String, baseUrl: String, deviceId: String, commandId: String) {

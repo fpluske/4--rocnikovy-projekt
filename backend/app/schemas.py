@@ -67,6 +67,7 @@ class DeviceRead(DeviceCreate):
     horizon_os_update_pending: bool
     ip_address: str | None
     current_app: str | None
+    current_app_package: str | None
     installed_apps: list[InstalledApp] = Field(default_factory=list)
     last_seen_at: datetime | None
     created_at: datetime
@@ -85,6 +86,7 @@ class DeviceHeartbeat(BaseModel):
     horizon_os_version: str | None = Field(default=None, max_length=120)
     horizon_os_update_pending: bool = False
     current_app: str | None = Field(default=None, max_length=200)
+    current_app_package: str | None = Field(default=None, max_length=300)
     installed_apps: list[InstalledApp] = Field(default_factory=list)
 
 

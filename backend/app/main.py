@@ -51,6 +51,8 @@ def ensure_device_status_columns() -> None:
             ))
         if "installed_apps" not in columns:
             connection.execute(text("ALTER TABLE devices ADD COLUMN installed_apps JSON"))
+        if "current_app_package" not in columns:
+            connection.execute(text("ALTER TABLE devices ADD COLUMN current_app_package VARCHAR(300)"))
         connection.execute(text("UPDATE devices SET installed_apps = '[]' WHERE installed_apps IS NULL"))
 
 
@@ -510,6 +512,7 @@ def heartbeat(
     device.horizon_os_version = data.horizon_os_version
     device.horizon_os_update_pending = data.horizon_os_update_pending
     device.current_app = data.current_app
+    device.current_app_package = data.current_app_package
     device.installed_apps = [installed_app.model_dump() for installed_app in data.installed_apps]
     if request.client is not None:
         device.ip_address = request.client.host
@@ -528,7 +531,7 @@ def heartbeat(
         db.add(AuditEvent(
             device=device,
             type=EventType.command_completed,
-            message=f"Příkaz {pending_restart.type.value} byl dokončen po restartu zařízení.",
+            message=f"Příkaz {getattr(pending_restart.type, 'value', pending_restart.type)} byl dokončen po restartu zařízení.",
             metadata_json={"command_id": pending_restart.id},
         ))
     db.add(AuditEvent(device=device, type=EventType.heartbeat, message=f"Heartbeat zařízení {device.name}."))
@@ -605,7 +608,7 @@ def update_command(
         db.add(AuditEvent(
             device=command.device,
             type=EventType.command_completed,
-            message=f"Příkaz {command.type.value} byl dokončen se stavem {data.status.value}.",
+            message=f"Příkaz {getattr(command.type, 'value', command.type)} byl dokončen se stavem {data.status.value}.",
             metadata_json={"command_id": command.id, "error_message": data.error_message},
         ))
     db.commit()
