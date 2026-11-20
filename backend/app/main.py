@@ -16,13 +16,13 @@ from .config import settings
 from .database import Base, SessionLocal, engine, get_db
 from .models import (
     AuditEvent, Command, CommandStatus, CommandType, Device, DeviceStatus, EventType, PairingRequest,
-    PairingStatus, UpdatePackage, User, UserRole,
+    PairingStatus, UpdatePackage, User, UserRole, DeviceGroup,
 )
 from .schemas import (
     AuthStatus, LoginCreate, PasswordChange, SetupCreate, UserCreate, UserRead,
     CommandUpdate,
     CommandCreate, CommandRead, DeviceCreate, DeviceHeartbeat, DeviceRead, EventRead, HealthRead,
-    PairingConfirm, PairingDiscovery, PairingRead, UpdatePackageRead,
+    PairingConfirm, PairingDiscovery, PairingRead, UpdatePackageRead, DeviceGroupCreate, DeviceGroupRead,
 )
 
 Base.metadata.create_all(bind=engine)
@@ -358,6 +358,65 @@ def list_devices(db: Session = Depends(get_db)) -> list[Device]:
     if changed:
         db.commit()
     return devices
+
+
+def device_group_read(group: DeviceGroup) -> DeviceGroupRead:
+    return DeviceGroupRead(
+        id=group.id,
+        name=group.name,
+        device_ids=[device.id for device in group.devices],
+        created_at=group.created_at,
+    )
+
+
+@app.get("/api/groups", response_model=list[DeviceGroupRead], tags=["groups"])
+def list_device_groups(db: Session = Depends(get_db)) -> list[DeviceGroupRead]:
+    groups = list(db.scalars(select(DeviceGroup).order_by(DeviceGroup.created_at.desc())))
+    return [device_group_read(group) for group in groups]
+
+
+@app.post("/api/groups", response_model=DeviceGroupRead, status_code=status.HTTP_201_CREATED, tags=["groups"])
+def create_device_group(data: DeviceGroupCreate, request: Request, db: Session = Depends(get_db)) -> DeviceGroupRead:
+    admin_user(request)
+    if db.scalar(select(DeviceGroup).where(DeviceGroup.name == data.name)) is not None:
+        raise HTTPException(status_code=409, detail="Skupina s tímto názvem již existuje.")
+    devices = [db.get(Device, device_id) for device_id in dict.fromkeys(data.device_ids)]
+    if any(device is None for device in devices):
+        raise HTTPException(status_code=404, detail="Jedno z vybraných zařízení nebylo nalezeno.")
+    group = DeviceGroup(name=data.name, devices=[device for device in devices if device is not None])
+    db.add(group)
+    db.commit()
+    db.refresh(group)
+    return device_group_read(group)
+
+
+@app.put("/api/groups/{group_id}", response_model=DeviceGroupRead, tags=["groups"])
+def update_device_group(group_id: str, data: DeviceGroupCreate, request: Request, db: Session = Depends(get_db)) -> DeviceGroupRead:
+    admin_user(request)
+    group = db.get(DeviceGroup, group_id)
+    if group is None:
+        raise HTTPException(status_code=404, detail="Skupina nebyla nalezena.")
+    existing = db.scalar(select(DeviceGroup).where(DeviceGroup.name == data.name, DeviceGroup.id != group_id))
+    if existing is not None:
+        raise HTTPException(status_code=409, detail="Skupina s tímto názvem již existuje.")
+    devices = [db.get(Device, device_id) for device_id in dict.fromkeys(data.device_ids)]
+    if any(device is None for device in devices):
+        raise HTTPException(status_code=404, detail="Jedno z vybraných zařízení nebylo nalezeno.")
+    group.name = data.name
+    group.devices = [device for device in devices if device is not None]
+    db.commit()
+    db.refresh(group)
+    return device_group_read(group)
+
+
+@app.delete("/api/groups/{group_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["groups"])
+def delete_device_group(group_id: str, request: Request, db: Session = Depends(get_db)) -> None:
+    admin_user(request)
+    group = db.get(DeviceGroup, group_id)
+    if group is None:
+        raise HTTPException(status_code=404, detail="Skupina nebyla nalezena.")
+    db.delete(group)
+    db.commit()
 
 
 @app.get("/api/updates/latest", response_model=UpdatePackageRead | None, tags=["updates"])

@@ -99,6 +99,18 @@ class UpdatePackageRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class DeviceGroupCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    device_ids: list[str] = Field(default_factory=list)
+
+
+class DeviceGroupRead(BaseModel):
+    id: str
+    name: str
+    device_ids: list[str] = Field(default_factory=list)
+    created_at: datetime
+
+
 class CommandCreate(BaseModel):
     type: CommandType
     payload: dict | None = None

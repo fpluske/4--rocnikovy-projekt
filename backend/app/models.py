@@ -2,7 +2,7 @@ from datetime import datetime
 from enum import StrEnum
 from uuid import uuid4
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, JSON, String, Text, func
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, JSON, String, Table, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .database import Base
@@ -67,6 +67,14 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
+device_group_members = Table(
+    "device_group_members",
+    Base.metadata,
+    Column("device_id", String(36), ForeignKey("devices.id", ondelete="CASCADE"), primary_key=True),
+    Column("group_id", String(36), ForeignKey("device_groups.id", ondelete="CASCADE"), primary_key=True),
+)
+
+
 class Device(Base):
     __tablename__ = "devices"
 
@@ -94,6 +102,23 @@ class Device(Base):
 
     commands: Mapped[list["Command"]] = relationship(back_populates="device", cascade="all, delete-orphan")
     events: Mapped[list["AuditEvent"]] = relationship(back_populates="device", cascade="all, delete-orphan")
+    groups: Mapped[list["DeviceGroup"]] = relationship(
+        secondary=device_group_members,
+        back_populates="devices",
+    )
+
+
+class DeviceGroup(Base):
+    __tablename__ = "device_groups"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    name: Mapped[str] = mapped_column(String(120), unique=True, index=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    devices: Mapped[list[Device]] = relationship(
+        secondary=device_group_members,
+        back_populates="groups",
+    )
 
 
 class PairingRequest(Base):

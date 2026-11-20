@@ -77,6 +77,12 @@ function Dashboard({ user, onLogout }) {
   const [appsDevices, setAppsDevices] = useState(null);
   const [lockedDeviceIds, setLockedDeviceIds] = useState([]);
   const [selectedLiveDeviceIds, setSelectedLiveDeviceIds] = useState([]);
+  const [groups, setGroups] = useState([]);
+  const [groupModalOpen, setGroupModalOpen] = useState(false);
+  const [editingGroupId, setEditingGroupId] = useState(null);
+  const [groupName, setGroupName] = useState("");
+  const [groupDeviceIds, setGroupDeviceIds] = useState([]);
+  const [activeGroupId, setActiveGroupId] = useState(null);
   const [expandedDeviceIds, setExpandedDeviceIds] = useState([]);
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem("orbit-theme") === "dark");
   const [passwordForm, setPasswordForm] = useState({ current_password: "", new_password: "" });
@@ -91,18 +97,20 @@ function Dashboard({ user, onLogout }) {
 
   const loadDevices = async () => {
     setLoading(true);
-    const [healthResult, devicesResult, pairingsResult, updateResult] = await Promise.allSettled([
+    const [healthResult, devicesResult, pairingsResult, updateResult, groupsResult] = await Promise.allSettled([
       request("/api/health"),
       request("/api/devices"),
       request("/api/pairing"),
       request("/api/updates/latest"),
+      request("/api/groups"),
     ]);
     if (healthResult.status === "fulfilled") setServerStatus("online");
     else setServerStatus("offline");
     if (devicesResult.status === "fulfilled") setDevices(devicesResult.value);
     if (pairingsResult.status === "fulfilled") setPairings(pairingsResult.value);
     if (updateResult.status === "fulfilled") setLatestUpdate(updateResult.value);
-    const failedResult = [healthResult, devicesResult, pairingsResult, updateResult].find((result) => result.status === "rejected");
+    if (groupsResult.status === "fulfilled") setGroups(groupsResult.value);
+    const failedResult = [healthResult, devicesResult, pairingsResult, updateResult, groupsResult].find((result) => result.status === "rejected");
     if (failedResult) setMessage(failedResult.reason.message);
     setLoading(false);
   };
@@ -227,7 +235,84 @@ function Dashboard({ user, onLogout }) {
     if (selectedDevices.length > 0) setAppsDevices(selectedDevices);
   };
 
+  const openNewGroup = () => {
+    setEditingGroupId(null);
+    setGroupName("");
+    setGroupDeviceIds([...selectedLiveDeviceIds]);
+    setGroupModalOpen(true);
+  };
+
+  const openEditGroup = (group) => {
+    setEditingGroupId(group.id);
+    setGroupName(group.name);
+    setGroupDeviceIds([...group.device_ids]);
+    setGroupModalOpen(true);
+  };
+
+  const saveGroup = async (event) => {
+    event.preventDefault();
+    if (groupDeviceIds.length === 0) {
+      setMessage("Vyberte alespoň jedno zařízení.");
+      return;
+    }
+    try {
+      const path = editingGroupId ? `/api/groups/${editingGroupId}` : "/api/groups";
+      await request(path, {
+        method: editingGroupId ? "PUT" : "POST",
+        body: JSON.stringify({ name: groupName, device_ids: groupDeviceIds }),
+      });
+      setGroupModalOpen(false);
+      setEditingGroupId(null);
+      setGroupName("");
+      setGroupDeviceIds([]);
+      setMessage(editingGroupId ? "Skupina byla upravena." : "Skupina byla vytvořena.");
+      await loadDevices();
+    } catch (error) { setMessage(error.message); }
+  };
+
+  const removeGroup = async (group) => {
+    if (!window.confirm(`Opravdu odstranit skupinu „${group.name}“?`)) return;
+    try {
+      await request(`/api/groups/${group.id}`, { method: "DELETE" });
+      if (activeGroupId === group.id) setActiveGroupId(null);
+      setMessage("Skupina byla odstraněna.");
+      await loadDevices();
+    } catch (error) { setMessage(error.message); }
+  };
+
+  const sendGroupCommand = async (group, type) => {
+    const groupDevices = devices.filter((device) =>
+      group.device_ids.includes(device.id) && device.status !== "offline" && device.status !== "unknown"
+    );
+    if (groupDevices.length === 0) {
+      setMessage("Ve skupině nejsou žádná zařízení.");
+      return;
+    }
+    const results = await Promise.allSettled(groupDevices.map((device) =>
+      request(`/api/devices/${device.id}/commands`, {
+        method: "POST",
+        body: JSON.stringify({ type }),
+      })
+    ));
+    const successful = results.filter((result) => result.status === "fulfilled").length;
+    const failed = results.length - successful;
+    const commandLabels = { restart: "Restart", lock: "Uzamknutí", unlock: "Odemknutí" };
+    setMessage(failed === 0
+      ? `${commandLabels[type]} bylo zařazeno pro ${successful} zařízení skupiny „${group.name}“.`
+      : `${commandLabels[type]} bylo zařazeno pro ${successful} zařízení; ${failed} příkazů bylo odmítnuto.`);
+  };
+
+  const watchGroup = (group) => {
+    devices
+      .filter((device) => group.device_ids.includes(device.id) && device.status === "online")
+      .forEach(openLiveView);
+  };
+
   const onlineDevices = devices.filter((device) => device.status === "online");
+  const activeGroup = groups.find((group) => group.id === activeGroupId);
+  const visibleDevices = activeGroup
+    ? devices.filter((device) => activeGroup.device_ids.includes(device.id))
+    : devices;
   const allOnlineSelected = onlineDevices.length > 0 && onlineDevices.every((device) => selectedLiveDeviceIds.includes(device.id));
   const selectedDevices = devices.filter((device) => selectedLiveDeviceIds.includes(device.id));
   const toggleAllOnlineSelection = () => {
@@ -258,8 +343,16 @@ function Dashboard({ user, onLogout }) {
     {activeView === "users" ? <UserManagement setMessage={setMessage} /> : <>
     {pairingOpen && user.role === "admin" && <section className="card pairing-form-card"><div className="section-heading"><div><p className="eyebrow">NOVÉ ZAŘÍZENÍ</p><h2>Spustit párování</h2></div><button className="close-button" onClick={() => setPairingOpen(false)} aria-label="Zavřít">×</button></div><p className="muted">V prototypu zde simulujete discovery packet z aplikace headsetu.</p><form className="pairing-form" onSubmit={discoverDevice}><label>Název headsetu<input required autoFocus value={pairingForm.name} onChange={(e) => setPairingForm({ ...pairingForm, name: e.target.value })} placeholder="Např. Quest učebna 1" /></label><label>Sériové číslo<input required value={pairingForm.serial_number} onChange={(e) => setPairingForm({ ...pairingForm, serial_number: e.target.value })} /></label><label>PIN z headsetu<input required inputMode="numeric" pattern="[0-9]{4}" maxLength="4" value={pairingForm.pin} onChange={(e) => setPairingForm({ ...pairingForm, pin: e.target.value.replace(/\D/g, "") })} placeholder="4 číslice" /></label><div className="form-actions"><button type="button" onClick={() => setPairingOpen(false)}>Zrušit</button><button className="primary">Odeslat discovery</button></div></form></section>}
     {pairings.length > 0 && user.role === "admin" && <section className="card pairing-card"><div className="section-heading"><h2>Čekající párování</h2><span>{pairings.length} nové</span></div>{pairings.map((pairing) => <article className="device" key={pairing.id}><div><h3>{pairing.name}</h3><p className="muted">{pairing.model} · {pairing.serial_number}</p><span className="status unknown">čeká na potvrzení</span></div><div className="pairing-actions"><button className="primary" onClick={() => confirmPairing(pairing)}>Potvrdit PINem</button><button className="danger" onClick={() => rejectPairing(pairing)}>Odmítnout</button></div></article>)}</section>}
+    {groupModalOpen && user.role === "admin" && <section className="card pairing-form-card">
+      <div className="section-heading"><div><p className="eyebrow">SKUPINA HEADSETŮ</p><h2>{editingGroupId ? "Upravit skupinu" : "Vytvořit skupinu"}</h2></div><button className="close-button" onClick={() => setGroupModalOpen(false)} aria-label="Zavřít">×</button></div>
+      <form className="pairing-form" onSubmit={saveGroup}>
+        <label>Název skupiny<input required autoFocus maxLength="120" value={groupName} onChange={(event) => setGroupName(event.target.value)} placeholder="Např. Učebna A" /></label>
+        <fieldset className="group-device-picker"><legend>Zařízení ve skupině</legend>{devices.map((device) => <label key={device.id}><input type="checkbox" checked={groupDeviceIds.includes(device.id)} onChange={(event) => setGroupDeviceIds((current) => event.target.checked ? [...current, device.id] : current.filter((id) => id !== device.id))} /><span>{device.name}</span></label>)}</fieldset>
+        <div className="form-actions"><button type="button" onClick={() => setGroupModalOpen(false)}>Zrušit</button><button className="primary">{editingGroupId ? "Uložit změny" : "Vytvořit skupinu"}</button></div>
+      </form>
+    </section>}
     <section className="layout">
-      <section className="card devices-card"><div className="section-heading"><div><h2>Zařízení</h2><span>{devices.length} celkem</span></div>{devices.length > 0 && <div className="live-selection-actions"><button className="primary pairing-button" onClick={openSelectedApps} disabled={selectedDevices.length === 0}>Aplikace ({selectedDevices.length})</button><button className="icon-button secondary" onClick={loadDevices} aria-label="Obnovit zařízení" title="Obnovit">↻</button><button className="secondary" onClick={toggleAllOnlineSelection} disabled={onlineDevices.length === 0}>{allOnlineSelected ? "Zrušit výběr" : "Vybrat online"}</button><button className="primary" onClick={openSelectedLiveViews} disabled={selectedLiveDeviceIds.length === 0}>Sledovat vybrané ({selectedLiveDeviceIds.length})</button></div>}</div>{loading ? <p className="muted">Načítám...</p> : devices.length === 0 ? <div className="empty"><p>Zatím není spárován žádný headset.</p>{user.role === "admin" && <button className="primary" onClick={() => setPairingOpen(true)}>Párovat první zařízení</button>}</div> : <div className="device-list">{devices.map((device) => {
+      <section className="card devices-card"><div className="section-heading"><div><h2>{activeGroup ? `Zařízení — ${activeGroup.name}` : "Zařízení"}</h2><span>{visibleDevices.length} z {devices.length} celkem</span></div>{devices.length > 0 && <div className="live-selection-actions">{user.role === "admin" && <button className="secondary" onClick={openNewGroup} disabled={selectedDevices.length === 0}>Vytvořit skupinu ({selectedDevices.length})</button>}<button className="primary pairing-button" onClick={openSelectedApps} disabled={selectedDevices.length === 0}>Aplikace ({selectedDevices.length})</button><button className="icon-button secondary" onClick={loadDevices} aria-label="Obnovit zařízení" title="Obnovit">↻</button><button className="secondary" onClick={toggleAllOnlineSelection} disabled={onlineDevices.length === 0}>{allOnlineSelected ? "Zrušit výběr" : "Vybrat online"}</button><button className="primary" onClick={openSelectedLiveViews} disabled={selectedLiveDeviceIds.length === 0}>Sledovat vybrané ({selectedLiveDeviceIds.length})</button></div>}</div>{loading ? <p className="muted">Načítám...</p> : visibleDevices.length === 0 ? <div className="empty"><p>{activeGroup ? "Ve skupině zatím není žádné zařízení." : "Zatím není spárován žádný headset."}</p>{!activeGroup && user.role === "admin" && <button className="primary" onClick={() => setPairingOpen(true)}>Párovat první zařízení</button>}</div> : <div className="device-list">{visibleDevices.map((device) => {
         const isLive = liveDevices.some((liveDevice) => liveDevice.id === device.id);
         const isSelected = selectedLiveDeviceIds.includes(device.id);
         const isExpanded = expandedDeviceIds.includes(device.id);
@@ -268,7 +361,7 @@ function Dashboard({ user, onLogout }) {
           <div className="device-summary">
             <div className="device-info">
               <label className="live-checkbox">
-                <input type="checkbox" checked={isSelected} disabled={device.status !== "online"} onChange={() => toggleLiveDeviceSelection(device.id)} aria-label={`Vybrat přenos ${device.name}`} />
+                <input type="checkbox" checked={isSelected} onChange={() => toggleLiveDeviceSelection(device.id)} aria-label={`Vybrat zařízení ${device.name}`} />
               </label>
               <div>
                 <div className="device-heading">
@@ -308,6 +401,23 @@ function Dashboard({ user, onLogout }) {
         </article>;
       })}</div>}</section>
     </section>
+    {groups.length > 0 && <section className="card device-groups-card">
+      <div className="section-heading"><div><p className="eyebrow">SKUPINY HEADSETŮ</p><h2>Skupiny</h2></div><button className={activeGroupId ? "secondary" : "primary"} onClick={() => setActiveGroupId(null)}>Všechny</button></div>
+      <div className="group-list">{groups.map((group) => {
+        const groupOnlineCount = devices.filter((device) => group.device_ids.includes(device.id) && device.status === "online").length;
+        return <article className={`group-row ${activeGroupId === group.id ? "active" : ""}`} key={group.id}>
+          <button className="group-select" onClick={() => setActiveGroupId((current) => current === group.id ? null : group.id)}><strong>{group.name}</strong><span>{group.device_ids.length} zařízení · {groupOnlineCount} online</span></button>
+          <div className="group-actions">
+            <button className="live-button" disabled={groupOnlineCount === 0} onClick={() => watchGroup(group)}>Živě ({groupOnlineCount})</button>
+            <button onClick={() => sendGroupCommand(group, "restart")}>Restart</button>
+            <button onClick={() => sendGroupCommand(group, "lock")}>Uzamknout</button>
+            <button onClick={() => sendGroupCommand(group, "unlock")}>Odemknout</button>
+            {user.role === "admin" && <button className="secondary" onClick={() => openEditGroup(group)}>Upravit</button>}
+            {user.role === "admin" && <button className="danger" onClick={() => removeGroup(group)}>Odstranit</button>}
+          </div>
+        </article>;
+      })}</div>
+    </section>}
     {liveDevices.length > 0 && <LiveViewGallery devices={liveDevices} onClose={closeLiveView} onCloseAll={() => setLiveDevices([])} />}
     {appsDevice && <InstalledAppsModal device={appsDevice} onClose={() => setAppsDevice(null)} onLaunch={(app) => launchApp(appsDevice, app)} />}
     {appsDevices && <CommonInstalledAppsModal devices={appsDevices} onClose={() => setAppsDevices(null)} onLaunch={launchAppOnSelectedDevices} />}
