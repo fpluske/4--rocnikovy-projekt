@@ -3,7 +3,11 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
 import secrets
+import threading
+import urllib.error
+import urllib.request
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, status
 from fastapi import WebSocket, WebSocketDisconnect
@@ -77,6 +81,8 @@ ensure_user_columns()
 DEVICE_OFFLINE_AFTER = timedelta(seconds=30)
 
 app = FastAPI(title="Orbit Quest Management API", version="0.1.0")
+logger = logging.getLogger("orbit.updates")
+update_stop_event = threading.Event()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origin_list,
@@ -84,6 +90,69 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def refresh_github_update() -> None:
+    api_url = f"https://api.github.com/repos/{settings.github_repository}/releases/latest"
+    request = urllib.request.Request(
+        api_url,
+        headers={
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "Orbit-Quest-Management",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            release = json.load(response)
+    except (OSError, urllib.error.URLError, json.JSONDecodeError) as error:
+        logger.warning("GitHub release se nepodařilo načíst: %s", error)
+        return
+
+    assets = release.get("assets", [])
+    apk_asset = next(
+        (asset for asset in assets if str(asset.get("name", "")).lower().endswith(".apk")),
+        None,
+    )
+    if apk_asset is None:
+        logger.warning("GitHub release %s neobsahuje APK asset.", release.get("tag_name", "unknown"))
+        return
+    version = str(release.get("tag_name", "")).removeprefix("v").strip()
+    download_url = apk_asset.get("browser_download_url")
+    if not version or not download_url:
+        logger.warning("GitHub release nemá platnou verzi nebo URL APK.")
+        return
+
+    checksum = apk_asset.get("digest")
+    if isinstance(checksum, str) and checksum.startswith("sha256:"):
+        checksum = checksum.removeprefix("sha256:")
+    if not isinstance(checksum, str) or len(checksum) != 64:
+        logger.warning("APK asset release %s nemá SHA-256 digest.", version)
+        return
+    with SessionLocal() as db:
+        package = db.scalar(select(UpdatePackage).where(UpdatePackage.version == version))
+        if package is None:
+            package = UpdatePackage(version=version, download_url=download_url, checksum=checksum)
+            db.add(package)
+        else:
+            package.download_url = download_url
+            package.checksum = checksum
+        db.commit()
+
+
+def github_update_loop() -> None:
+    while not update_stop_event.is_set():
+        refresh_github_update()
+        update_stop_event.wait(max(60, settings.github_update_interval_seconds))
+
+
+@app.on_event("startup")
+def start_github_update_loop() -> None:
+    threading.Thread(target=github_update_loop, name="github-update-checker", daemon=True).start()
+
+
+@app.on_event("shutdown")
+def stop_github_update_loop() -> None:
+    update_stop_event.set()
 
 webrtc_connections: dict[str, set[WebSocket]] = {}
 SESSION_COOKIE = "orbit_session"
@@ -642,7 +711,17 @@ def create_command(device_id: str, data: CommandCreate, db: Session = Depends(ge
             status_code=409,
             detail="Headset ještě nepotvrdil dokončení předchozího příkazu.",
         )
-    command = Command(device_id=device_id, **data.model_dump())
+    payload = data.payload
+    if data.type == CommandType.update:
+        latest = db.scalar(select(UpdatePackage).order_by(desc(UpdatePackage.created_at)).limit(1))
+        if latest is None or not latest.download_url:
+            raise HTTPException(status_code=409, detail="Není dostupná žádná aktualizace Orbit Agenta.")
+        payload = {
+            "version": latest.version,
+            "download_url": latest.download_url,
+            "checksum": latest.checksum,
+        }
+    command = Command(device_id=device_id, type=data.type, payload=payload)
     db.add(command)
     db.add(AuditEvent(device=device, type=EventType.command_created, message=f"Naplánován příkaz: {data.type.value}."))
     db.commit()

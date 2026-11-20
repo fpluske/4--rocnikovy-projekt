@@ -6,6 +6,8 @@ services:
       DATABASE_URL: ${DATABASE_URL:-sqlite:///./data/orbit.db}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://localhost:8080}
       WEBRTC_ICE_SERVERS: '${WEBRTC_ICE_SERVERS:-[{"urls":["stun:stun.l.google.com:19302"]}]}'
+      GITHUB_REPOSITORY: ${GITHUB_REPOSITORY:-fpluske/4--rocnikovy-projekt}
+      GITHUB_UPDATE_INTERVAL_SECONDS: ${GITHUB_UPDATE_INTERVAL_SECONDS:-3600}
     ports:
       - "8000:8000"
     volumes:

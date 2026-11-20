@@ -11,8 +11,8 @@ android {
         applicationId = "cz.orbit.quest"
         minSdk = 29
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = providers.gradleProperty("orbitVersionCode").orElse("1").get().toInt()
+        versionName = providers.gradleProperty("orbitVersion").orElse("0.1.0").get()
     }
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"

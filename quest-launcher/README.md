@@ -100,6 +100,15 @@ Po spárování aplikace skryje ovládání nového párování a zobrazí tlač
 **Reset**. Jeho použitím se uložené spojení smaže, vygeneruje se nové párování
 a aplikace se vrátí do párovacího režimu.
 
+## Aktualizace Orbit Agenta
+
+Backend sleduje nejnovější GitHub Release repozitáře a u headsetů se starší
+verzí zobrazí v dashboardu tlačítko **Aktualizovat**. Agent jako Device Owner
+stáhne APK z GitHubu, ověří jeho SHA-256 digest, nainstaluje ho přes
+`PackageInstaller` a po úspěchu headset restartuje. Release APK musí být
+podepsané stejným klíčem jako nainstalovaný Agent a musí mít vyšší
+`versionCode`; samotné zvýšení `versionName` pro Android instalaci nestačí.
+
 Pokud je headset online, lze v dashboardu stisknout **Živě**. Aplikace si
 vyžádá systémové oprávnění ke sdílení obrazovky a následně obraz odešle přímo
 do prohlížeče přes WebRTC. Backend slouží pouze jako signalizační relay.

@@ -142,6 +142,8 @@ function Dashboard({ user, onLogout }) {
         ? "Spuštění aplikace bylo zařazeno do fronty."
         : type === "force_stop"
           ? "Vynucené ukončení aplikace bylo zařazeno do fronty."
+          : type === "update"
+            ? "Aktualizace Orbit Agenta byla zařazena do fronty."
           : `Příkaz „${type}“ byl zařazen do fronty.`;
       setMessage(message);
       return true;
@@ -356,7 +358,7 @@ function Dashboard({ user, onLogout }) {
         const isLive = liveDevices.some((liveDevice) => liveDevice.id === device.id);
         const isSelected = selectedLiveDeviceIds.includes(device.id);
         const isExpanded = expandedDeviceIds.includes(device.id);
-        const updateAvailable = isUpdateAvailable(device.firmware_version, latestUpdate?.version);
+        const updateAvailable = latestUpdate?.download_url && isUpdateAvailable(device.firmware_version, latestUpdate?.version);
         return <article className={`device ${isExpanded ? "expanded" : ""}`} key={device.id}>
           <div className="device-summary">
             <div className="device-info">
@@ -386,6 +388,7 @@ function Dashboard({ user, onLogout }) {
               <button className="live-button" disabled={device.status !== "online" || isLive} onClick={() => openLiveView(device)}>{isLive ? "Sleduji" : "Živě"}</button>
               <InstalledAppsButton apps={device.installed_apps || []} onClick={() => setAppsDevice(device)} />
               <button onClick={() => sendCommand(device, "restart")}>Restart</button>
+              {updateAvailable && <button className="primary" disabled={device.status !== "online"} onClick={() => sendCommand(device, "update")}>Aktualizovat</button>}
               <button onClick={() => toggleDeviceLock(device)}>{lockedDeviceIds.includes(device.id) ? "Odemknout" : "Uzamknout"}</button>
               {user.role === "admin" && <button className="danger" onClick={() => removeDevice(device)}>Odstranit</button>}
               <button className="details-toggle" onClick={() => toggleDeviceDetails(device.id)} aria-expanded={isExpanded} aria-label={`${isExpanded ? "Skrýt" : "Zobrazit"} podrobnosti zařízení ${device.name}`}>

@@ -117,7 +117,23 @@ dashboard jej při dalším načtení označí jako `offline`.
 Dashboard zobrazuje aktuální verzi Horizon OS a stav čekající systémové
 aktualizace nahlášené Device Owner agentem. Zobrazuje také verzi Orbit Agenta a porovnává ji
 s nejnovějším záznamem v tabulce `update_packages`. Pokud je novější balíček
-dostupný, zobrazí jeho verzi.
+dostupný, zobrazí jeho verzi a nabídne aktualizaci. Backend kontroluje nejnovější
+GitHub Release každou hodinu (nastavení `GITHUB_UPDATE_INTERVAL_SECONDS`).
+Release musí obsahovat APK asset a GitHub SHA-256 digest; agent APK stáhne,
+digest ověří, nainstaluje jako Device Owner a po úspěšné instalaci headset
+restartuje. APK musí mít stejný podpis jako již nainstalovaný Agent a vyšší
+Android `versionCode`.
+
+Aktualizace se vydává jako GitHub Release v repozitáři nastaveném přes
+`GITHUB_REPOSITORY`. APK lze sestavit s verzí a monotónním Android kódem:
+
+```bash
+./gradlew :app:assembleRelease \
+  -PorbitVersion=0.2.8 -PorbitVersionCode=2
+```
+
+Server sám nenahrazuje běžící Docker image; po vydání nové serverové verze
+zobrazení upozornění a nasazení image zůstává součástí deploymentu.
 Při zhasnutí displeje nebo přechodu headsetu do standby agent posílá stav
 `standby`, který dashboard zobrazí jako „režim spánku“. Po probuzení se stav
 vrátí na `online`.

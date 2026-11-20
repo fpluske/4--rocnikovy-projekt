@@ -2,16 +2,25 @@ package cz.orbit.quest
 
 import android.app.Service
 import android.app.ActivityManager
+import android.app.PendingIntent
+import android.content.BroadcastReceiver
 import android.app.usage.UsageEvents
 import android.app.usage.UsageStatsManager
 import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
+import android.content.IntentFilter
 import android.content.Intent
 import android.os.IBinder
 import android.util.Log
+import java.io.File
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URI
+import java.security.MessageDigest
+import java.util.UUID
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import android.content.pm.PackageInstaller
 import org.json.JSONObject
 
 class CommandExecutionService : Service() {
@@ -69,15 +78,126 @@ class CommandExecutionService : Service() {
                 }
                 "launch_app" -> launchApp(baseUrl, deviceId, commandId, command)
                 "force_stop" -> forceStopCurrentApp(baseUrl, deviceId, commandId, command)
+                "update" -> updateAgent(baseUrl, deviceId, commandId, command)
                 "shutdown" -> updateCommand(
                     baseUrl, deviceId, commandId, "failed",
                     "Android neposkytuje aplikaci API pro vypnutí zařízení; použijte uzamčení.",
                 )
                 else -> updateCommand(baseUrl, deviceId, commandId, "failed", "Neznámý typ příkazu.")
             }
+
         } catch (error: Exception) {
             Log.w("OrbitQuest", "Příkaz se nepodařilo vykonat.", error)
             updateCommand(baseUrl, deviceId, commandId, "failed", error.message ?: "Neznámá chyba.")
+        }
+    }
+
+    private fun updateAgent(baseUrl: String, deviceId: String, commandId: String, command: JSONObject) {
+        val payload = command.optJSONObject("payload")
+        val downloadUrl = payload?.optString("download_url").orEmpty()
+        val checksum = payload?.optString("checksum").orEmpty()
+        if (!downloadUrl.startsWith("https://github.com/")) {
+            updateCommand(baseUrl, deviceId, commandId, "failed", "Aktualizace má nepovolený zdroj.")
+            return
+        }
+        if (checksum.isBlank()) {
+            updateCommand(baseUrl, deviceId, commandId, "failed", "Aktualizace nemá kontrolní součet.")
+            return
+        }
+        if (!updateCommand(baseUrl, deviceId, commandId, "acknowledged", null)) return
+        val apkFile = File.createTempFile("orbit-agent-", ".apk", cacheDir)
+        try {
+            downloadApk(downloadUrl, apkFile)
+            if (sha256(apkFile) != checksum.lowercase()) {
+                throw IOException("Kontrolní součet APK nesouhlasí.")
+            }
+            if (!installApk(apkFile)) {
+                updateCommand(baseUrl, deviceId, commandId, "failed", "Android instalaci APK odmítl.")
+                return
+            }
+            updateCommand(baseUrl, deviceId, commandId, "completed", null)
+            getSystemService(DevicePolicyManager::class.java).reboot(
+                ComponentName(this, OrbitDeviceAdminReceiver::class.java),
+            )
+        } catch (error: Exception) {
+            Log.w("OrbitQuest", "Aktualizaci Orbit Agenta se nepodařilo nainstalovat.", error)
+            updateCommand(baseUrl, deviceId, commandId, "failed", error.message ?: "Aktualizace selhala.")
+        } finally {
+            apkFile.delete()
+        }
+    }
+
+    private fun downloadApk(downloadUrl: String, destination: File) {
+        val connection = (URI(downloadUrl).toURL().openConnection() as HttpURLConnection).apply {
+            connectTimeout = 15_000
+            readTimeout = 60_000
+            instanceFollowRedirects = true
+        }
+        try {
+            if (connection.responseCode !in 200..299) throw IOException("Stažení APK selhalo: HTTP ${connection.responseCode}")
+            connection.inputStream.use { input ->
+                destination.outputStream().use { output -> input.copyTo(output) }
+            }
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private fun sha256(file: File): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        file.inputStream().use { input ->
+            val buffer = ByteArray(8192)
+            var read = input.read(buffer)
+            while (read >= 0) {
+                if (read > 0) digest.update(buffer, 0, read)
+                read = input.read(buffer)
+            }
+        }
+        return digest.digest().joinToString("") { "%02x".format(it) }
+    }
+
+    private fun installApk(apkFile: File): Boolean {
+        val packageInstaller = packageManager.packageInstaller
+        val session = packageInstaller.openSession(
+            packageInstaller.createSession(
+                PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL),
+            ),
+        )
+        val action = "${packageName}.UPDATE_${UUID.randomUUID()}"
+        val latch = CountDownLatch(1)
+        var successful = false
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: android.content.Context, intent: Intent) {
+                successful = intent.getIntExtra(
+                    PackageInstaller.EXTRA_STATUS,
+                    PackageInstaller.STATUS_FAILURE,
+                ) == PackageInstaller.STATUS_SUCCESS
+                latch.countDown()
+            }
+        }
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(receiver, IntentFilter(action), RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(receiver, IntentFilter(action))
+        }
+        try {
+            session.openWrite("base.apk", 0, apkFile.length()).use { output ->
+                apkFile.inputStream().use { input -> input.copyTo(output) }
+                session.fsync(output)
+            }
+            session.commit(
+                PendingIntent.getBroadcast(
+                    this,
+                    0,
+                    Intent(action),
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE,
+                ).intentSender,
+            )
+            if (!latch.await(90, TimeUnit.SECONDS)) return false
+            return successful
+        } finally {
+            unregisterReceiver(receiver)
+            session.close()
         }
     }
 
