@@ -14,8 +14,34 @@ android {
         versionCode = providers.gradleProperty("orbitVersionCode").orElse("1").get().toInt()
         versionName = providers.gradleProperty("orbitVersion").orElse("0.1.0").get()
     }
+    val releaseSigningConfigured = listOf(
+        System.getenv("ORBIT_KEYSTORE"),
+        System.getenv("ORBIT_KEYSTORE_PASSWORD"),
+        System.getenv("ORBIT_KEY_PASSWORD"),
+    ).all { !it.isNullOrBlank() }
+
+    signingConfigs {
+        if (releaseSigningConfigured) {
+            create("release") {
+                storeFile = file(System.getenv("ORBIT_KEYSTORE"))
+                storePassword = System.getenv("ORBIT_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("ORBIT_KEY_ALIAS") ?: "orbit-agent"
+                keyPassword = System.getenv("ORBIT_KEY_PASSWORD")
+            }
+        }
+    }
+    buildTypes {
+        release {
+            if (releaseSigningConfigured) {
+                signingConfig = signingConfigs.getByName("release")
+            }
+        }
+    }
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
+    }
+    lint {
+        checkReleaseBuilds = false
     }
 }
 

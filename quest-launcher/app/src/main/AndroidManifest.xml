@@ -25,7 +25,7 @@
         <service
             android:name=".ScreenCaptureForegroundService"
             android:exported="false"
-            android:foregroundServiceType="mediaProjection" />
+            android:foregroundServiceType="dataSync|mediaProjection" />
         <service
             android:name=".OrbitAgentService"
             android:exported="false"

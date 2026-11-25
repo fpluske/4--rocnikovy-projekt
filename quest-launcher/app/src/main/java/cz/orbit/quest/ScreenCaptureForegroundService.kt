@@ -10,6 +10,10 @@ import android.os.IBinder
 import android.content.pm.ServiceInfo
 import android.provider.Settings
 import android.util.Log
+import java.io.IOException
+import java.net.HttpURLConnection
+import java.net.URI
+import java.net.URISyntaxException
 import java.net.URLEncoder
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -33,6 +37,7 @@ class ScreenCaptureForegroundService : Service() {
     companion object {
         private const val CHANNEL_ID = "screen_capture"
         private const val NOTIFICATION_ID = 1002
+        private const val ACTIVITY_LAUNCH_COOLDOWN_MS = 2_000L
         const val EXTRA_PERMISSION_DATA = "permission_data"
         const val EXTRA_OFFER_SDP = "offer_sdp"
         const val EXTRA_REMOTE_CANDIDATES = "remote_candidates"
@@ -55,9 +60,11 @@ class ScreenCaptureForegroundService : Service() {
     private var pendingOffer: SessionDescription? = null
     private val pendingCandidates = mutableListOf<org.webrtc.IceCandidate>()
     private var remoteDescriptionReady = false
-    private val iceServers = listOf(
+    private var lastActivityLaunchAt = 0L
+    private var iceServers = listOf(
         PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
     )
+    private var iceConfigLoading = false
 
     override fun onCreate() {
         super.onCreate()
@@ -102,7 +109,7 @@ class ScreenCaptureForegroundService : Service() {
         }
         val notification = Notification.Builder(this, CHANNEL_ID)
             .setContentTitle("Orbit Quest")
-            .setContentText("Obraz headsetu se sdílí do webu.")
+            .setContentText(if (permissionData == null) "Připraven ke sdílení obrazovky." else "Obraz headsetu se sdílí do webu.")
             .setSmallIcon(android.R.drawable.ic_menu_view)
             .setOngoing(true)
             .build()
@@ -110,12 +117,16 @@ class ScreenCaptureForegroundService : Service() {
             startForeground(
                 NOTIFICATION_ID,
                 notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION,
+                if (permissionData == null) {
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+                } else {
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+                },
             )
         } else {
             startForeground(NOTIFICATION_ID, notification)
         }
-        if (permissionData != null) connectSignaling()
+        loadIceServersAndConnect()
         onForegroundReady?.invoke()
         return START_NOT_STICKY
     }
@@ -134,7 +145,7 @@ class ScreenCaptureForegroundService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     private fun connectSignaling() {
-        if (signalingSocket != null || permissionData == null) return
+        if (signalingSocket != null) return
         val baseUrl = preferences.getString("paired_backend_url", null).orEmpty()
         if (baseUrl.isBlank()) return
         val wsUrl = baseUrl.replaceFirst("https://", "wss://").replaceFirst("http://", "ws://") +
@@ -154,9 +165,21 @@ class ScreenCaptureForegroundService : Service() {
                 override fun onMessage(webSocket: WebSocket, text: String) {
                     try {
                         val message = JSONObject(text)
+                        val direction = message.optString("direction", "headset_to_web")
                         when (message.getString("type")) {
-                            "offer" -> startCapture(SessionDescription(SessionDescription.Type.OFFER, message.getString("sdp")))
-                            "candidate" -> {
+                            "offer" -> {
+                                val offer = SessionDescription(SessionDescription.Type.OFFER, message.getString("sdp"))
+                                if (direction == "web_to_headset") launchActivity(
+                                    MainActivity.ACTION_START_WEB_RECEIVE,
+                                    offer.description,
+                                    null,
+                                ) else if (permissionData == null) launchActivity(
+                                    MainActivity.ACTION_START_SCREEN_CAPTURE,
+                                    offer.description,
+                                    pendingCandidates,
+                                ) else startCapture(offer)
+                            }
+                            "candidate" -> if (direction == "headset_to_web") {
                                 val candidate = message.getJSONObject("candidate")
                                 val iceCandidate = org.webrtc.IceCandidate(
                                     candidate.optString("sdpMid"),
@@ -168,6 +191,7 @@ class ScreenCaptureForegroundService : Service() {
                             }
                             "hangup" -> stopPeerConnection()
                         }
+
                     } catch (error: JSONException) {
                         Log.w("OrbitQuest", "Neplatná WebRTC signalizace.", error)
                     }
@@ -180,6 +204,68 @@ class ScreenCaptureForegroundService : Service() {
                 }
             },
         )
+    }
+
+    private fun launchActivity(action: String, offer: String, candidates: List<org.webrtc.IceCandidate>?) {
+        val now = System.currentTimeMillis()
+        if (now - lastActivityLaunchAt < ACTIVITY_LAUNCH_COOLDOWN_MS) return
+        lastActivityLaunchAt = now
+        val candidatesJson = org.json.JSONArray().apply {
+            candidates.orEmpty().forEach { candidate ->
+                put(JSONObject()
+                    .put("sdpMid", candidate.sdpMid)
+                    .put("sdpMLineIndex", candidate.sdpMLineIndex)
+                    .put("candidate", candidate.sdp))
+            }
+        }
+        startActivity(Intent(this, MainActivity::class.java).apply {
+            this.action = action
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            putExtra(MainActivity.EXTRA_WEB_OFFER, offer)
+            putExtra(MainActivity.EXTRA_WEB_CANDIDATES, candidatesJson.toString())
+        })
+    }
+
+    private fun loadIceServersAndConnect() {
+        if (iceConfigLoading || signalingSocket != null) return
+        val baseUrl = preferences.getString("paired_backend_url", null).orEmpty()
+        if (baseUrl.isBlank()) return
+        iceConfigLoading = true
+        Thread {
+            try {
+                val connection = (URI("$baseUrl/api/webrtc/config").toURL()
+                    .openConnection() as HttpURLConnection).apply {
+                    connectTimeout = 5000
+                    readTimeout = 5000
+                }
+                if (connection.responseCode !in 200..299) throw IOException("HTTP ${connection.responseCode}")
+                val servers = JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
+                    .getJSONArray("ice_servers")
+                val parsed = (0 until servers.length()).map { index ->
+                    val server = servers.getJSONObject(index)
+                    val urls = server.get("urls")
+                    val builder = if (urls is org.json.JSONArray) {
+                        PeerConnection.IceServer.builder((0 until urls.length()).map { urls.getString(it) })
+                    } else {
+                        PeerConnection.IceServer.builder(urls.toString())
+                    }
+                    if (server.has("username")) builder.setUsername(server.getString("username"))
+                    if (server.has("credential")) builder.setPassword(server.getString("credential"))
+                    builder.createIceServer()
+                }
+                if (parsed.isNotEmpty()) iceServers = parsed
+                connection.disconnect()
+            } catch (error: IOException) {
+                Log.w("OrbitQuest", "Konfigurace ICE se nepodařila načíst, používám STUN.", error)
+            } catch (error: JSONException) {
+                Log.w("OrbitQuest", "Konfigurace ICE má neplatný formát, používám STUN.", error)
+            } catch (error: URISyntaxException) {
+                Log.w("OrbitQuest", "URL konfigurace ICE není platná, používám STUN.", error)
+            } finally {
+                iceConfigLoading = false
+                connectSignaling()
+            }
+        }.start()
     }
 
     private fun startCapture(offer: SessionDescription) {
@@ -231,7 +317,7 @@ class ScreenCaptureForegroundService : Service() {
                     override fun onCreateSuccess(description: SessionDescription) {
                         peerConnection?.setLocalDescription(object : SdpObserver() {
                             override fun onSetSuccess() {
-                                signalingSocket?.send("""{"type":"answer","sdp":${json(description.description)}}""")
+                                signalingSocket?.send("""{"type":"answer","direction":"headset_to_web","sdp":${json(description.description)}}""")
                             }
                         }, description)
                     }

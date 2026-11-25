@@ -45,6 +45,9 @@ local.properties
 captures/
 .externalNativeBuild/
 .cxx/
+*.jks
+*.keystore
+.orbit-signing.env
 
 # Java and Kotlin
 *.class

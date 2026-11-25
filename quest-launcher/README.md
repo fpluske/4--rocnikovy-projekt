@@ -112,3 +112,17 @@ podepsané stejným klíčem jako nainstalovaný Agent a musí mít vyšší
 Pokud je headset online, lze v dashboardu stisknout **Živě**. Aplikace si
 vyžádá systémové oprávnění ke sdílení obrazovky a následně obraz odešle přímo
 do prohlížeče přes WebRTC. Backend slouží pouze jako signalizační relay.
+
+## Skript pro vydání nové aktualizace
+
+V adresáři `quest-launcher` lze sestavení, ověření podpisu a vytvoření GitHub
+Release provést jedním příkazem:
+
+```bash
+cd quest-launcher
+./release-update.sh 0.2.9 3 "Popis změn"
+```
+
+První argument je `versionName`, druhý vyšší Android `versionCode` a třetí je
+volitelný text poznámky k releasu. Skript načte `.orbit-signing.env`, podepsané
+APK ověří, vypíše SHA-256 a vytvoří GitHub Release v tagu `v0.2.9`.

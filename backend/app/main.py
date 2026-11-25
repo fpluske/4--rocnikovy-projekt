@@ -159,7 +159,7 @@ SESSION_COOKIE = "orbit_session"
 SESSION_DURATION = timedelta(hours=8)
 PUBLIC_API_PATHS = {
     "/api/health", "/api/auth/status", "/api/auth/login", "/api/auth/setup",
-    "/api/devices/heartbeat", "/api/pairing/discover",
+    "/api/devices/heartbeat", "/api/pairing/discover", "/api/webrtc/config",
 }
 
 

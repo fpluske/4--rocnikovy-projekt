@@ -162,6 +162,13 @@ je spustit jedním tlačítkem; dostupná je také rychlá volba všech online h
 Před použitím živého obrazu musí být headset online a aplikace musí být
 spárovaná se stejným backendem.
 
+U online zařízení je také tlačítko **Web → headset**. Po kliknutí prohlížeč
+pomocí `getDisplayMedia()` nabídne výběr celé obrazovky, okna nebo karty a
+vybraný obraz odešle přes WebRTC do aplikace Orbit na headsetu, kde se zobrazí
+jako ploché video. Pokud aplikace Orbit není právě otevřená, agent ji při
+požadavku automaticky otevře. Sdílení lze ukončit zavřením dialogu nebo
+zastavením zdroje v prohlížeči.
+
 Pro sítě, ve kterých přímé ICE spojení neprojde, nastavte TURN server přes
 proměnnou `WEBRTC_ICE_SERVERS`. Hodnota je JSON pole kompatibilní s konfigurací
 `RTCPeerConnection`, například:

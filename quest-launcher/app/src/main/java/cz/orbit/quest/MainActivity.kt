@@ -47,6 +47,25 @@ import org.webrtc.SessionDescription
 import org.webrtc.VideoSource
 import org.webrtc.VideoTrack
 import org.webrtc.SurfaceTextureHelper
+import org.webrtc.SurfaceViewRenderer
+import org.webrtc.RendererCommon
+import kotlin.math.roundToInt
+
+private class AspectRatioLayout(context: Context) : FrameLayout(context) {
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        val availableWidth = MeasureSpec.getSize(widthMeasureSpec)
+        val availableHeight = MeasureSpec.getSize(heightMeasureSpec)
+        val width = minOf(availableWidth, (availableHeight * 16f / 9f).roundToInt())
+        val height = minOf(availableHeight, (availableWidth * 9f / 16f).roundToInt())
+        val measuredWidth = if (width > 0) width else availableWidth
+        val measuredHeight = if (height > 0) height else availableHeight
+        setMeasuredDimension(measuredWidth, measuredHeight)
+        measureChildren(
+            MeasureSpec.makeMeasureSpec(measuredWidth, MeasureSpec.EXACTLY),
+            MeasureSpec.makeMeasureSpec(measuredHeight, MeasureSpec.EXACTLY),
+        )
+    }
+}
 
 class MainActivity : Activity() {
     companion object {
@@ -65,6 +84,27 @@ class MainActivity : Activity() {
         const val PENDING_PAIRING_ID = "pending_pairing_id"
         const val LOCKED = "locked"
         const val SCREEN_CAPTURE_REQUEST = 1001
+        const val ACTION_START_SCREEN_CAPTURE = "cz.orbit.quest.action.START_SCREEN_CAPTURE"
+        const val ACTION_START_WEB_RECEIVE = "cz.orbit.quest.action.START_WEB_RECEIVE"
+        const val EXTRA_WEB_OFFER = "web_offer"
+        const val EXTRA_WEB_CANDIDATES = "web_candidates"
+    }
+
+    private fun readCandidates(value: String?, target: MutableList<org.webrtc.IceCandidate>) {
+        if (value.isNullOrBlank()) return
+        try {
+            val candidates = org.json.JSONArray(value)
+            for (index in 0 until candidates.length()) {
+                val candidate = candidates.getJSONObject(index)
+                target += org.webrtc.IceCandidate(
+                    candidate.optString("sdpMid"),
+                    candidate.getInt("sdpMLineIndex"),
+                    candidate.getString("candidate"),
+                )
+            }
+        } catch (error: JSONException) {
+            Log.w("OrbitQuest", "Předané ICE kandidáty mají neplatný formát.", error)
+        }
     }
 
     private val preferences: SharedPreferences by lazy {
@@ -78,6 +118,8 @@ class MainActivity : Activity() {
     private lateinit var pairingPinLabel: TextView
     private lateinit var pairingPinText: TextView
     private lateinit var lockOverlay: TextView
+    private lateinit var mainContent: FrameLayout
+    private lateinit var mainScroll: ScrollView
     private val pairingHandler = Handler(Looper.getMainLooper())
     private val pairingPollInFlight = AtomicBoolean(false)
     private val serialNumber by lazy {
@@ -92,6 +134,7 @@ class MainActivity : Activity() {
     private var eglBase: EglBase? = null
     private var surfaceTextureHelper: SurfaceTextureHelper? = null
     private var pendingOffer: SessionDescription? = null
+    private var pendingWebToHeadsetOffer: SessionDescription? = null
     private var pendingCapture: Pair<SessionDescription, Intent>? = null
     private var screenCapturePermission: Intent? = null
     private val pendingRemoteCandidates = mutableListOf<org.webrtc.IceCandidate>()
@@ -100,6 +143,12 @@ class MainActivity : Activity() {
     private var screenCaptureServiceReady = false
     private var peerFactory: PeerConnectionFactory? = null
     private var screenCapturePromptInFlight = false
+    private var webToHeadsetPeerConnection: PeerConnection? = null
+    private var webToHeadsetVideoTrack: org.webrtc.VideoTrack? = null
+    private var webToHeadsetRemoteDescriptionReady = false
+    private val pendingWebToHeadsetCandidates = mutableListOf<org.webrtc.IceCandidate>()
+    private var renderEglBase: EglBase? = null
+    private var remoteRenderer: SurfaceViewRenderer? = null
     private var iceServers = listOf(
         PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer()
     )
@@ -126,6 +175,7 @@ class MainActivity : Activity() {
             setPadding(48, 48, 48, 32)
         }
         val scroll = ScrollView(this).apply { addView(root) }
+        mainScroll = scroll
 
         root.addView(label("ORBIT QUEST / PROTOTYP"))
         root.addView(title("Párování headsetu"))
@@ -180,10 +230,26 @@ class MainActivity : Activity() {
             isClickable = true
             visibility = View.GONE
         }
+        val renderer = SurfaceViewRenderer(this).also {
+            renderEglBase = EglBase.create()
+            it.init(renderEglBase!!.eglBaseContext, null)
+            it.setEnableHardwareScaler(true)
+            it.setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FIT)
+            it.visibility = View.GONE
+            remoteRenderer = it
+        }
+        val rendererContainer = AspectRatioLayout(this).apply {
+            setBackgroundColor(0xff000000.toInt())
+            addView(renderer, FrameLayout.LayoutParams(-1, -1))
+        }
         val content = FrameLayout(this).apply {
+            addView(rendererContainer, FrameLayout.LayoutParams(-1, -1).apply {
+                gravity = Gravity.CENTER
+            })
             addView(scroll, FrameLayout.LayoutParams(-1, -1))
             addView(lockOverlay, FrameLayout.LayoutParams(-1, -1))
         }
+        mainContent = content
         setContentView(content)
         updatePairingControls()
         if (preferences.getBoolean(LOCKED, false)) {
@@ -203,10 +269,13 @@ class MainActivity : Activity() {
         when {
             isPaired() -> {
                 startAgentService()
-                requestScreenCapturePermissionIfNeeded()
+                startScreenCaptureService()
+                if (intent?.action != ACTION_START_WEB_RECEIVE && intent?.action != ACTION_START_SCREEN_CAPTURE) {
+                    requestScreenCapturePermissionIfNeeded()
+                }
             }
         }
-        if (isPaired() && !ScreenCaptureForegroundService.signalingReady) loadIceServersAndConnect()
+        if (isPaired() && signalingSocket == null) loadIceServersAndConnect()
     }
 
     override fun onStop() {
@@ -215,8 +284,11 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
+        stopWebToHeadset()
         signalingSocket?.close(1000, "Activity destroyed")
         signalingSocket = null
+        remoteRenderer?.release()
+        renderEglBase?.release()
         peerFactory?.dispose()
         peerFactory = null
         super.onDestroy()
@@ -238,6 +310,8 @@ class MainActivity : Activity() {
         val offer = pendingOffer
         pendingOffer = null
         screenCapturePermission = data
+        signalingSocket?.close(1000, "Předávám živý obraz službě")
+        signalingSocket = null
         startBackgroundScreenCaptureService(data, offer, pendingRemoteCandidates)
         finishAndRemoveTask()
     }
@@ -250,14 +324,21 @@ class MainActivity : Activity() {
         signalingSocket = OkHttpClient().newWebSocket(Request.Builder().url(wsUrl).build(), object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 webSocket.send("""{"type":"device"}""")
+                pendingWebToHeadsetOffer?.let {
+                    pendingWebToHeadsetOffer = null
+                    startWebToHeadset(it)
+                }
                 runOnUiThread { status.text = "Stav: headset je připravený pro živé sdílení." }
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
                 try {
                     val message = JSONObject(text)
+                    val direction = message.optString("direction", "headset_to_web")
                     when (message.getString("type")) {
-                        "offer" -> runOnUiThread {
+                        "offer" -> if (direction == "web_to_headset") {
+                            startWebToHeadset(SessionDescription(SessionDescription.Type.OFFER, message.getString("sdp")))
+                        } else runOnUiThread {
                             status.text = "Stav: web žádá o sdílení obrazovky..."
                             pendingOffer = SessionDescription(SessionDescription.Type.OFFER, message.getString("sdp"))
                             if (!screenCapturePromptInFlight) {
@@ -273,14 +354,18 @@ class MainActivity : Activity() {
                                 candidate.getInt("sdpMLineIndex"),
                                 candidate.getString("candidate")
                             )
-                            runOnUiThread {
+                            if (direction == "web_to_headset") {
+                                if (webToHeadsetPeerConnection == null || !webToHeadsetRemoteDescriptionReady) pendingWebToHeadsetCandidates += iceCandidate
+                                else webToHeadsetPeerConnection?.addIceCandidate(iceCandidate)
+                            } else runOnUiThread {
                                 val connection = peerConnection
                                 if (connection == null || !remoteDescriptionReady) pendingRemoteCandidates += iceCandidate
                                 else connection.addIceCandidate(iceCandidate)
                             }
                         }
-                        "hangup" -> runOnUiThread { stopPeerConnection() }
+                        "hangup" -> if (direction == "web_to_headset") runOnUiThread { stopWebToHeadset() } else runOnUiThread { stopPeerConnection() }
                     }
+
                 } catch (error: JSONException) {
                     Log.w("OrbitQuest", "Neplatná WebRTC signalizace.", error)
                 }
@@ -292,6 +377,66 @@ class MainActivity : Activity() {
                 signalingSocket = null
             }
         })
+    }
+
+    private fun startWebToHeadset(offer: SessionDescription) {
+        val factory = peerFactory ?: return
+        stopWebToHeadset()
+        runOnUiThread {
+            mainScroll.visibility = View.GONE
+            remoteRenderer?.visibility = View.VISIBLE
+        }
+        webToHeadsetPeerConnection = factory.createPeerConnection(
+            PeerConnection.RTCConfiguration(iceServers),
+            object : PeerConnection.Observer {
+                override fun onTrack(transceiver: org.webrtc.RtpTransceiver) {
+                    (transceiver.receiver.track() as? org.webrtc.VideoTrack)?.let { track ->
+                        webToHeadsetVideoTrack = track
+                        remoteRenderer?.let(track::addSink)
+                    }
+                }
+                override fun onIceCandidate(candidate: org.webrtc.IceCandidate) {
+                    signalingSocket?.send("""{"type":"candidate","direction":"web_to_headset","candidate":{"sdpMid":${json(candidate.sdpMid ?: "")},"sdpMLineIndex":${candidate.sdpMLineIndex},"candidate":${json(candidate.sdp)}}}""")
+                }
+                override fun onSignalingChange(newState: PeerConnection.SignalingState) {}
+                override fun onIceConnectionChange(newState: PeerConnection.IceConnectionState) {}
+                override fun onIceConnectionReceivingChange(receiving: Boolean) {}
+                override fun onIceGatheringChange(newState: PeerConnection.IceGatheringState) {}
+                override fun onIceCandidatesRemoved(candidates: Array<out org.webrtc.IceCandidate>) {}
+                override fun onAddStream(stream: org.webrtc.MediaStream) {}
+                override fun onRemoveStream(stream: org.webrtc.MediaStream) {}
+                override fun onDataChannel(dataChannel: org.webrtc.DataChannel) {}
+                override fun onRenegotiationNeeded() {}
+                override fun onAddTrack(receiver: org.webrtc.RtpReceiver, mediaStreams: Array<out org.webrtc.MediaStream>) {}
+            },
+        )
+        webToHeadsetPeerConnection?.setRemoteDescription(object : SdpObserver() {
+            override fun onSetSuccess() {
+                webToHeadsetRemoteDescriptionReady = true
+                pendingWebToHeadsetCandidates.forEach { webToHeadsetPeerConnection?.addIceCandidate(it) }
+                pendingWebToHeadsetCandidates.clear()
+                webToHeadsetPeerConnection?.createAnswer(object : SdpObserver() {
+                    override fun onCreateSuccess(description: SessionDescription) {
+                        webToHeadsetPeerConnection?.setLocalDescription(object : SdpObserver() {
+                            override fun onSetSuccess() {
+                                signalingSocket?.send("""{"type":"answer","direction":"web_to_headset","sdp":${json(description.description)}}""")
+                            }
+                        }, description)
+                    }
+                }, MediaConstraints())
+            }
+        }, offer)
+    }
+
+    private fun stopWebToHeadset() {
+        remoteRenderer?.let { webToHeadsetVideoTrack?.removeSink(it) }
+        webToHeadsetVideoTrack = null
+        webToHeadsetPeerConnection?.close()
+        webToHeadsetPeerConnection = null
+        pendingWebToHeadsetCandidates.clear()
+        webToHeadsetRemoteDescriptionReady = false
+        remoteRenderer?.visibility = View.GONE
+        if (::mainScroll.isInitialized) mainScroll.visibility = View.VISIBLE
     }
 
     private fun loadIceServersAndConnect() {
@@ -592,7 +737,7 @@ class MainActivity : Activity() {
             status.text = "Stav: headset je spárovaný a připojený."
             updatePairingControls()
             startAgentService()
-            requestScreenCapturePermissionIfNeeded()
+            startScreenCaptureService()
             loadIceServersAndConnect()
         }
     }
@@ -686,6 +831,29 @@ class MainActivity : Activity() {
             }
             ACTION_UNLOCK -> window.decorView.post {
                 executeKioskCommand(intent) { exitKioskMode() }
+            }
+            ACTION_START_SCREEN_CAPTURE -> window.decorView.post {
+                pendingOffer = intent.getStringExtra(EXTRA_WEB_OFFER)?.let {
+                    SessionDescription(SessionDescription.Type.OFFER, it)
+                }
+                pendingRemoteCandidates.clear()
+                readCandidates(intent.getStringExtra(EXTRA_WEB_CANDIDATES), pendingRemoteCandidates)
+                if (!screenCapturePromptInFlight) {
+                    val projection = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+                    screenCapturePromptInFlight = true
+                    startActivityForResult(projection.createScreenCaptureIntent(), SCREEN_CAPTURE_REQUEST)
+                }
+            }
+            ACTION_START_WEB_RECEIVE -> window.decorView.post {
+                pendingWebToHeadsetOffer = intent.getStringExtra(EXTRA_WEB_OFFER)?.let {
+                    SessionDescription(SessionDescription.Type.OFFER, it)
+                }
+                pendingWebToHeadsetOffer?.let { offer ->
+                    if (signalingSocket != null) {
+                        pendingWebToHeadsetOffer = null
+                        startWebToHeadset(offer)
+                    }
+                }
             }
         }
     }

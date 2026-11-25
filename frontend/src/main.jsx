@@ -73,6 +73,7 @@ function Dashboard({ user, onLogout }) {
   const [loading, setLoading] = useState(true);
   const [serverStatus, setServerStatus] = useState("unknown");
   const [liveDevices, setLiveDevices] = useState([]);
+  const [webShareDevice, setWebShareDevice] = useState(null);
   const [appsDevice, setAppsDevice] = useState(null);
   const [appsDevices, setAppsDevices] = useState(null);
   const [lockedDeviceIds, setLockedDeviceIds] = useState([]);
@@ -224,6 +225,10 @@ function Dashboard({ user, onLogout }) {
     setLiveDevices((current) => current.filter((device) => device.id !== deviceId));
   };
 
+  const openWebShare = (device) => {
+    setWebShareDevice(device);
+  };
+
   const toggleLiveDeviceSelection = (deviceId) => {
     setSelectedLiveDeviceIds((current) => current.includes(deviceId) ? current.filter((id) => id !== deviceId) : [...current, deviceId]);
   };
@@ -354,7 +359,7 @@ function Dashboard({ user, onLogout }) {
       </form>
     </section>}
     <section className="layout">
-      <section className="card devices-card"><div className="section-heading"><div><h2>{activeGroup ? `Zařízení — ${activeGroup.name}` : "Zařízení"}</h2><span>{visibleDevices.length} z {devices.length} celkem</span></div>{devices.length > 0 && <div className="live-selection-actions">{user.role === "admin" && <button className="secondary" onClick={openNewGroup} disabled={selectedDevices.length === 0}>Vytvořit skupinu ({selectedDevices.length})</button>}<button className="primary pairing-button" onClick={openSelectedApps} disabled={selectedDevices.length === 0}>Aplikace ({selectedDevices.length})</button><button className="icon-button secondary" onClick={loadDevices} aria-label="Obnovit zařízení" title="Obnovit">↻</button><button className="secondary" onClick={toggleAllOnlineSelection} disabled={onlineDevices.length === 0}>{allOnlineSelected ? "Zrušit výběr" : "Vybrat online"}</button><button className="primary" onClick={openSelectedLiveViews} disabled={selectedLiveDeviceIds.length === 0}>Sledovat vybrané ({selectedLiveDeviceIds.length})</button></div>}</div>{loading ? <p className="muted">Načítám...</p> : visibleDevices.length === 0 ? <div className="empty"><p>{activeGroup ? "Ve skupině zatím není žádné zařízení." : "Zatím není spárován žádný headset."}</p>{!activeGroup && user.role === "admin" && <button className="primary" onClick={() => setPairingOpen(true)}>Párovat první zařízení</button>}</div> : <div className="device-list">{visibleDevices.map((device) => {
+      <section className="card devices-card"><div className="section-heading"><div><h2>{activeGroup ? `Zařízení — ${activeGroup.name}` : "Zařízení"}</h2><span>{visibleDevices.length} z {devices.length} celkem</span></div>{devices.length > 0 && <div className="live-selection-actions">{user.role === "admin" && <button className="secondary" onClick={openNewGroup} disabled={selectedDevices.length === 0}>Vytvořit skupinu ({selectedDevices.length})</button>}<button className="primary pairing-button" onClick={openSelectedApps} disabled={selectedDevices.length === 0}>Aplikace ({selectedDevices.length})</button><button className="icon-button secondary" onClick={loadDevices} aria-label="Obnovit zařízení" title="Obnovit">↻</button><button className="secondary" onClick={toggleAllOnlineSelection} disabled={onlineDevices.length === 0}>{allOnlineSelected ? "Zrušit výběr" : "Vybrat online"}</button><button className="primary" onClick={openSelectedLiveViews} disabled={selectedLiveDeviceIds.length === 0}>Sdílet obrazovku ({selectedLiveDeviceIds.length})</button></div>}</div>{loading ? <p className="muted">Načítám...</p> : visibleDevices.length === 0 ? <div className="empty"><p>{activeGroup ? "Ve skupině zatím není žádné zařízení." : "Zatím není spárován žádný headset."}</p>{!activeGroup && user.role === "admin" && <button className="primary" onClick={() => setPairingOpen(true)}>Párovat první zařízení</button>}</div> : <div className="device-list">{visibleDevices.map((device) => {
         const isLive = liveDevices.some((liveDevice) => liveDevice.id === device.id);
         const isSelected = selectedLiveDeviceIds.includes(device.id);
         const isExpanded = expandedDeviceIds.includes(device.id);
@@ -385,7 +390,8 @@ function Dashboard({ user, onLogout }) {
               </div>
             </div>
             <div className="actions">
-              <button className="live-button" disabled={device.status !== "online" || isLive} onClick={() => openLiveView(device)}>{isLive ? "Sleduji" : "Živě"}</button>
+              <button className="live-button" disabled={device.status !== "online" || isLive} onClick={() => openLiveView(device)} aria-label={`Sdílet obrazovku headsetu ${device.name}`} title="Sdílet obrazovku headsetu do webu">{isLive ? "Sdílím headset" : "Headset → web"}</button>
+              <button className="web-share-button" disabled={device.status !== "online"} onClick={() => openWebShare(device)} title="Sdílet obrazovku webu do headsetu">Web → headset</button>
               <InstalledAppsButton apps={device.installed_apps || []} onClick={() => setAppsDevice(device)} />
               <button onClick={() => sendCommand(device, "restart")}>Restart</button>
               {updateAvailable && <button className="primary" disabled={device.status !== "online"} onClick={() => sendCommand(device, "update")}>Aktualizovat</button>}
@@ -411,7 +417,7 @@ function Dashboard({ user, onLogout }) {
         return <article className={`group-row ${activeGroupId === group.id ? "active" : ""}`} key={group.id}>
           <button className="group-select" onClick={() => setActiveGroupId((current) => current === group.id ? null : group.id)}><strong>{group.name}</strong><span>{group.device_ids.length} zařízení · {groupOnlineCount} online</span></button>
           <div className="group-actions">
-            <button className="live-button" disabled={groupOnlineCount === 0} onClick={() => watchGroup(group)}>Živě ({groupOnlineCount})</button>
+            <button className="live-button" disabled={groupOnlineCount === 0} onClick={() => watchGroup(group)} aria-label={`Sdílet obrazovky skupiny ${group.name}`} title="Sdílet obrazovky online headsetů">Sdílet obrazovky ({groupOnlineCount})</button>
             <button onClick={() => sendGroupCommand(group, "restart")}>Restart</button>
             <button onClick={() => sendGroupCommand(group, "lock")}>Uzamknout</button>
             <button onClick={() => sendGroupCommand(group, "unlock")}>Odemknout</button>
@@ -422,6 +428,7 @@ function Dashboard({ user, onLogout }) {
       })}</div>
     </section>}
     {liveDevices.length > 0 && <LiveViewGallery devices={liveDevices} onClose={closeLiveView} onCloseAll={() => setLiveDevices([])} />}
+    {webShareDevice && <WebShareToHeadset device={webShareDevice} onClose={() => setWebShareDevice(null)} />}
     {appsDevice && <InstalledAppsModal device={appsDevice} onClose={() => setAppsDevice(null)} onLaunch={(app) => launchApp(appsDevice, app)} />}
     {appsDevices && <CommonInstalledAppsModal devices={appsDevices} onClose={() => setAppsDevices(null)} onLaunch={launchAppOnSelectedDevices} />}
     </>}
@@ -454,6 +461,82 @@ function UserManagement({ setMessage }) {
 
 function LiveViewGallery({ devices, onClose, onCloseAll }) {
   return <div className="live-backdrop"><section className="live-modal"><div className="section-heading"><div><p className="eyebrow">ŽIVÉ PŘENOSY</p><h2>{devices.length} {devices.length === 1 ? "headset" : "headsety"} současně</h2></div><button className="close-button" onClick={onCloseAll} aria-label="Zavřít všechny přenosy">×</button></div><div className="live-grid">{devices.map((device) => <LiveView key={device.id} device={device} onClose={() => onClose(device.id)} />)}</div></section></div>;
+}
+
+function WebShareToHeadset({ device, onClose }) {
+  const [state, setState] = useState("Klikněte na tlačítko a vyberte obrazovku, okno nebo kartu.");
+  const [sharing, setSharing] = useState(false);
+  const socketRef = useRef(null);
+  const peerRef = useRef(null);
+  const streamRef = useRef(null);
+
+  useEffect(() => {
+    return () => {
+      streamRef.current?.getTracks().forEach((track) => track.stop());
+      if (socketRef.current?.readyState === WebSocket.OPEN) socketRef.current.send(JSON.stringify({ type: "hangup", direction: "web_to_headset" }));
+      socketRef.current?.close();
+      peerRef.current?.close();
+    };
+  }, []);
+
+  const startSharing = async () => {
+    try {
+      if (!navigator.mediaDevices?.getDisplayMedia) throw new Error("Tento prohlížeč nepodporuje sdílení obrazovky.");
+      const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+      streamRef.current = stream;
+      stream.getVideoTracks()[0]?.addEventListener("ended", onClose);
+      const configResponse = await fetch("/api/webrtc/config");
+      if (!configResponse.ok) throw new Error("Konfiguraci WebRTC se nepodařilo načíst.");
+      const { ice_servers: iceServers } = await configResponse.json();
+      const peer = new RTCPeerConnection({ iceServers, iceCandidatePoolSize: 10 });
+      peerRef.current = peer;
+      stream.getTracks().forEach((track) => peer.addTrack(track, stream));
+      const socket = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/webrtc/${encodeURIComponent(device.serial_number)}`);
+      socketRef.current = socket;
+      let remoteDescriptionSet = false;
+      const pendingCandidates = [];
+      peer.onicecandidate = (event) => {
+        if (event.candidate && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "candidate", direction: "web_to_headset", candidate: event.candidate.toJSON() }));
+      };
+      peer.onconnectionstatechange = () => {
+        if (peer.connectionState === "connected") setState("Web se sdílí do headsetu");
+        if (peer.connectionState === "failed") setState("Spojení webu s headsetem selhalo.");
+      };
+      socket.onopen = async () => {
+        socket.send(JSON.stringify({ type: "viewer", direction: "web_to_headset" }));
+        const offer = await peer.createOffer();
+        await peer.setLocalDescription(offer);
+        socket.send(JSON.stringify({ type: "offer", direction: "web_to_headset", sdp: offer.sdp }));
+        setState("Čekám na připojení headsetu…");
+      };
+      socket.onmessage = async ({ data }) => {
+        const message = JSON.parse(data);
+        if (message.direction !== "web_to_headset") return;
+        if (message.type === "answer") {
+          await peer.setRemoteDescription({ type: "answer", sdp: message.sdp });
+          remoteDescriptionSet = true;
+          while (pendingCandidates.length > 0) await peer.addIceCandidate(pendingCandidates.shift());
+        } else if (message.type === "candidate" && message.candidate) {
+          if (remoteDescriptionSet) await peer.addIceCandidate(message.candidate);
+          else pendingCandidates.push(message.candidate);
+        } else if (message.type === "error") {
+          setState(message.message || "Headset odmítl sdílení.");
+        }
+      };
+      socket.onerror = () => setState("Signalizace webu není dostupná.");
+      setSharing(true);
+    } catch (error) {
+      streamRef.current?.getTracks().forEach((track) => track.stop());
+      setState(error.message);
+    }
+  };
+
+  return <div className="live-backdrop"><section className="live-modal web-share-modal">
+    <div className="section-heading"><div><p className="eyebrow">WEB → HEADSET</p><h2>{device.name}</h2></div><button className="close-button" onClick={onClose} aria-label="Ukončit sdílení">×</button></div>
+    <p className="muted">{state}</p>
+    {!sharing && <button className="primary" onClick={startSharing}>Vybrat obrazovku</button>}
+    {sharing && <button className="secondary" onClick={onClose}>Ukončit sdílení</button>}
+  </section></div>;
 }
 
 function InstalledAppsModal({ device, onClose, onLaunch }) {
@@ -567,7 +650,7 @@ function LiveView({ device, onClose }) {
         };
         peer.onicecandidate = (event) => {
           if (event.candidate && socket.readyState === WebSocket.OPEN) {
-            socket.send(JSON.stringify({ type: "candidate", candidate: event.candidate.toJSON() }));
+            socket.send(JSON.stringify({ type: "candidate", direction: "headset_to_web", candidate: event.candidate.toJSON() }));
           }
         };
         peer.onicecandidateerror = (event) => console.warn("WebRTC ICE candidate error", event);
@@ -583,10 +666,10 @@ function LiveView({ device, onClose }) {
         };
         socket.onopen = async () => {
           try {
-            socket.send(JSON.stringify({ type: "viewer" }));
+            socket.send(JSON.stringify({ type: "viewer", direction: "headset_to_web" }));
             const offer = await peer.createOffer();
             await peer.setLocalDescription(offer);
-            socket.send(JSON.stringify({ type: "offer", sdp: offer.sdp }));
+            socket.send(JSON.stringify({ type: "offer", direction: "headset_to_web", sdp: offer.sdp }));
           } catch (error) {
             console.error("WebRTC offer failed", error);
             setConnectionState(`Offer selhal: ${error.message}`);
